@@ -37,48 +37,56 @@ export const loginAdmin = createServerFn({ method: "POST" })
     password: z.string().min(1),
   }))
   .handler(async ({ data }) => {
-    const sql = getDb();
-    const { email, password } = data;
+    try {
+      const sql = getDb();
+      const { email, password } = data;
 
-    const [dbUser] = await sql`
-      SELECT id, email, password_hash, full_name, role
-      FROM profiles
-      WHERE LOWER(email) = LOWER(${email.trim()}) AND role IN ('super_admin', 'admin') AND deleted_at IS NULL
-    `;
+      const [dbUser] = await sql`
+        SELECT id, email, password_hash, full_name, role
+        FROM profiles
+        WHERE LOWER(email) = LOWER(${email.trim()}) AND role IN ('super_admin', 'admin') AND deleted_at IS NULL
+      `;
 
-    if (!dbUser) {
-      throw new Error("Invalid credentials");
-    }
-
-    const isValid = await bcrypt.compare(password, dbUser.password_hash);
-    if (!isValid) {
-      throw new Error("Invalid credentials");
-    }
-
-    const secret = getJwtSecret();
-    const jwt = await new jose.SignJWT({ sub: dbUser.id, role: dbUser.role, email: dbUser.email })
-      .setProtectedHeader({ alg: "HS256" })
-      .setIssuedAt()
-      .setExpirationTime("7d")
-      .sign(secret);
-
-    setCookie(COOKIE_NAME, jwt, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/",
-      maxAge: 7 * 24 * 60 * 60,
-    });
-
-    return {
-      success: true,
-      user: {
-        id: dbUser.id,
-        email: dbUser.email,
-        name: dbUser.full_name,
-        role: dbUser.role,
+      if (!dbUser) {
+        return { success: false, error: "Invalid credentials" };
       }
-    };
+
+      const isValid = await bcrypt.compare(password, dbUser.password_hash);
+      if (!isValid) {
+        return { success: false, error: "Invalid credentials" };
+      }
+
+      const secret = getJwtSecret();
+      const jwt = await new jose.SignJWT({ sub: dbUser.id, role: dbUser.role, email: dbUser.email })
+        .setProtectedHeader({ alg: "HS256" })
+        .setIssuedAt()
+        .setExpirationTime("7d")
+        .sign(secret);
+
+      setCookie(COOKIE_NAME, jwt, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/",
+        maxAge: 7 * 24 * 60 * 60,
+      });
+
+      return {
+        success: true,
+        user: {
+          id: dbUser.id,
+          email: dbUser.email,
+          name: dbUser.full_name,
+          role: dbUser.role,
+        }
+      };
+    } catch (error: any) {
+      console.error("[SERVER] loginAdmin error:", error);
+      return {
+        success: false,
+        error: error.message || "An unexpected server-side error occurred"
+      };
+    }
   });
 
 export const logoutAdmin = createServerFn({ method: "POST" })

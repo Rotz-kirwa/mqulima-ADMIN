@@ -47,7 +47,7 @@ function AdminLogin() {
         toast.success("Welcome to the Admin Console");
         navigate({ to: "/", replace: true });
       } else {
-        toast.error("Invalid login credentials or permission denied");
+        toast.error(response?.error || "Invalid login credentials or permission denied");
       }
     } catch (error: any) {
       toast.error(error.message || "Failed to sign in. Please try again.");
