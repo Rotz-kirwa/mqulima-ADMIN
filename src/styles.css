@@ -1,0 +1,313 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Mqulima — Classic Agri-Tech Design System
+ * Green primary · Yellow actions · Blue secondary · Sepia blog
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-glow: var(--primary-glow);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-gold: var(--gold);
+  --color-gold-foreground: var(--gold-foreground);
+  --color-blue: var(--blue);
+  --color-blue-foreground: var(--blue-foreground);
+  --color-forest: var(--forest);
+  --color-forest-foreground: var(--forest-foreground);
+  --color-cream: var(--cream);
+  --color-sepia: var(--sepia);
+  --color-sepia-foreground: var(--sepia-foreground);
+  --color-sepia-muted: var(--sepia-muted);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+:root {
+  --radius: 0.875rem;
+
+  /* ── Brand ── */
+  --primary: oklch(0.43 0.12 152); /* Rich emerald green */
+  --primary-foreground: oklch(0.98 0.005 150);
+  --primary-glow: oklch(0.53 0.14 148);
+  --gold: oklch(0.82 0.17 86); /* Vivid golden yellow — action */
+  --gold-foreground: oklch(0.16 0.04 80);
+  --blue: oklch(0.52 0.14 252); /* Classic royal blue — secondary */
+  --blue-foreground: oklch(0.98 0 0);
+  --forest: oklch(0.19 0.05 152); /* Deep forest — dark surfaces */
+  --forest-foreground: oklch(0.97 0.01 90);
+  --cream: oklch(0.985 0.01 85);
+  --sepia: oklch(0.935 0.032 72); /* Warm parchment — blog bg */
+  --sepia-foreground: oklch(0.28 0.04 55);
+  --sepia-muted: oklch(0.89 0.04 68);
+
+  /* ── Surfaces ── */
+  --background: oklch(0.988 0.005 85); /* Warm off-white */
+  --foreground: oklch(0.17 0.04 152);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.17 0.04 152);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.17 0.04 152);
+
+  --secondary: oklch(0.955 0.012 88);
+  --secondary-foreground: oklch(0.19 0.05 152);
+  --muted: oklch(0.955 0.008 88);
+  --muted-foreground: oklch(0.46 0.025 152);
+  --accent: oklch(0.94 0.04 75);
+  --accent-foreground: oklch(0.19 0.05 152);
+
+  --destructive: oklch(0.55 0.22 27);
+  --destructive-foreground: oklch(0.98 0 0);
+  --success: oklch(0.55 0.14 150);
+
+  --border: oklch(0.915 0.012 85);
+  --input: oklch(0.915 0.012 85);
+  --ring: oklch(0.43 0.12 152);
+
+  /* ── Gradients & Shadows ── */
+  --gradient-hero: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--forest) 84%, transparent),
+    color-mix(in oklab, var(--forest) 22%, transparent) 50%,
+    color-mix(in oklab, var(--forest) 90%, transparent)
+  );
+  --gradient-primary: linear-gradient(135deg, var(--primary), var(--primary-glow));
+  --gradient-gold: linear-gradient(135deg, var(--gold), oklch(0.88 0.14 92));
+  --gradient-blue: linear-gradient(135deg, var(--blue), oklch(0.6 0.12 258));
+  --shadow-elegant: 0 20px 50px -18px color-mix(in oklab, var(--forest) 28%, transparent);
+  --shadow-card: 0 4px 16px -8px color-mix(in oklab, var(--forest) 12%, transparent);
+  --shadow-gold: 0 12px 32px -12px color-mix(in oklab, var(--gold) 50%, transparent);
+  --shadow-blue: 0 12px 32px -12px color-mix(in oklab, var(--blue) 40%, transparent);
+}
+
+.dark {
+  --background: oklch(0.16 0.02 152);
+  --foreground: oklch(0.97 0.01 90);
+  --card: oklch(0.2 0.03 152);
+  --card-foreground: oklch(0.97 0.01 90);
+  --popover: oklch(0.2 0.03 152);
+  --popover-foreground: oklch(0.97 0.01 90);
+  --primary: oklch(0.6 0.14 150);
+  --primary-foreground: oklch(0.14 0.02 152);
+  --secondary: oklch(0.26 0.03 152);
+  --secondary-foreground: oklch(0.97 0.01 90);
+  --muted: oklch(0.26 0.03 152);
+  --muted-foreground: oklch(0.68 0.02 90);
+  --accent: oklch(0.3 0.05 75);
+  --accent-foreground: oklch(0.97 0.01 90);
+  --blue: oklch(0.6 0.14 252);
+  --sepia: oklch(0.3 0.04 72);
+  --sepia-foreground: oklch(0.9 0.02 75);
+  --sepia-muted: oklch(0.35 0.04 68);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.6 0.14 150);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+}
+
+@utility container-px {
+  padding-inline: 1.25rem;
+  @media (min-width: 768px) {
+    padding-inline: 2rem;
+  }
+  @media (min-width: 1280px) {
+    padding-inline: 4rem;
+  }
+}
+
+@utility text-gradient-gold {
+  background: var(--gradient-gold);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility bg-gradient-hero {
+  background-image: var(--gradient-hero);
+}
+@utility bg-gradient-primary {
+  background-image: var(--gradient-primary);
+}
+@utility bg-gradient-blue {
+  background-image: var(--gradient-blue);
+}
+@utility shadow-elegant {
+  box-shadow: var(--shadow-elegant);
+}
+@utility shadow-card {
+  box-shadow: var(--shadow-card);
+}
+@utility shadow-gold {
+  box-shadow: var(--shadow-gold);
+}
+@utility shadow-blue {
+  box-shadow: var(--shadow-blue);
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+@utility animate-marquee {
+  animation: marquee 40s linear infinite;
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+@utility animate-float {
+  animation: float-slow 4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200px 0 }
+  100% { background-position: calc(200px + 100%) 0 }
+}
+@utility animate-shimmer {
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background-size: 200px 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+
+@keyframes particle-burst {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--tx), var(--ty)) scale(0.2);
+    opacity: 0;
+  }
+}
+
+@keyframes ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-25%);
+  }
+}
+
+@utility animate-ticker {
+  animation: ticker 25s linear infinite;
+}
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Mqulima Flat Button Theme Overrides
+   All buttons must have sharp rectangular/square corners (no rounded corners).
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* 1. Global Reset to Border Radius 0 for all buttons & button-like links */
+button,
+input[type="button"],
+input[type="submit"],
+.btn,
+.button,
+a[class*="rounded-"][class*="px-"][class*="py-"],
+a[class*="rounded-"][class*="p-"][class*="px-"],
+a[class*="bg-[#F5A623]"],
+a[class*="bg-gold"],
+a[class*="bg-[#2D6A4F]"],
+a[class*="bg-[#1A5438]"],
+a[class*="bg-white/10"],
+button[class*="rounded-"],
+a.outline-green,
+a.solid-gold {
+  border-radius: 0px !important;
+}
+
+/* 2. Style alignment with the user's provided layout reference */
+/* Solid gold buttons: flat corners, gold/yellow background, dark green text */
+a[class*="bg-[#F5A623]"],
+a[class*="bg-gold"],
+button[class*="bg-[#F5A623]"],
+button[class*="bg-gold"] {
+  background-color: var(--color-gold) !important;
+  color: #0A1E0C !important;
+  border: none !important;
+  font-weight: 700 !important;
+  transition: all 0.2s ease-in-out !important;
+  box-shadow: none !important;
+}
+a[class*="bg-[#F5A623]"]:hover,
+a[class*="bg-gold"]:hover,
+button[class*="bg-[#F5A623]"]:hover,
+button[class*="bg-gold"]:hover {
+  background-color: oklch(0.77 0.16 84) !important; /* slightly darker gold on hover */
+  transform: none !important;
+}
+
+/* Outline/ghost buttons: flat corners, green border, transparent bg, green text */
+a[class*="border-[#2D6A4F]"],
+button[class*="border-[#2D6A4F]"],
+button[class*="border-border"] {
+  border-radius: 0px !important;
+  transition: all 0.2s ease-in-out !important;
+}
