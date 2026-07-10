@@ -10,10 +10,6 @@ export default defineConfig({
     TanStackRouterVite({ autoCodeSplitting: true }),
     tanstackStart({
       server: { entry: "src/server.ts" },
-      // The admin panel imports .server.ts files directly in route beforeLoad/SSR
-      // context — disable the client-bundle import-protection check.
-      // All .server.ts files use createServerFn() so they are safe.
-      disableImportProtection: true,
     }),
     react(),
   ],
