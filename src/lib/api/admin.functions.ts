@@ -5,10 +5,10 @@ import { z } from "zod";
 export const getAdminDashboardData = createServerFn({ method: "GET" })
   .handler(async () => {
     // 0. Auth & Authorization Guard (dynamically imported to prevent leaking to client)
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // 1. Parallel KPI Queries using Promise.all
@@ -127,10 +127,10 @@ export const getAdminOrders = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const { page = 1, limit = 50 } = data;
     // 0. Auth & Authorization Guard
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const offset = (page - 1) * limit;
@@ -198,10 +198,10 @@ export const getAdminOrders = createServerFn({ method: "GET" })
 export const getAdminServiceRequests = createServerFn({ method: "GET" })
   .handler(async () => {
     // 0. Auth & Authorization Guard
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
     const requests = await sql`
       SELECT 
@@ -244,10 +244,10 @@ export const getAdminServiceRequests = createServerFn({ method: "GET" })
 export const getAdminProducts = createServerFn({ method: "GET" })
   .handler(async () => {
     // 0. Auth & Authorization Guard
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
     const products = await sql`
       SELECT 
@@ -330,14 +330,14 @@ export const createAdminProduct = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data }) => {
     // 1. CSRF Token Validation
-    const { validateCsrfToken } = await import("../csrf-verify.server");
+    const { validateCsrfToken } = await import("../csrf-verify-functions");
     validateCsrfToken(data.csrfToken);
 
     // 2. Auth & Authorization Guard
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // Find category_id — use product_categories because products table has an FK to it
@@ -375,7 +375,7 @@ export const createAdminProduct = createServerFn({ method: "POST" })
     `;
 
     // Write Audit Log
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "product.created",
@@ -413,14 +413,14 @@ export const updateAdminProduct = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data }) => {
     // 1. CSRF Token Validation
-    const { validateCsrfToken } = await import("../csrf-verify.server");
+    const { validateCsrfToken } = await import("../csrf-verify-functions");
     validateCsrfToken(data.csrfToken);
 
     // 2. Auth & Authorization Guard
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // Verify product exists
@@ -476,7 +476,7 @@ export const updateAdminProduct = createServerFn({ method: "POST" })
     `;
 
     // Write Audit Log
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "product.updated",
@@ -496,14 +496,14 @@ export const deleteAdminProduct = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data }) => {
     // 1. CSRF Token Validation
-    const { validateCsrfToken } = await import("../csrf-verify.server");
+    const { validateCsrfToken } = await import("../csrf-verify-functions");
     validateCsrfToken(data.csrfToken);
 
     // 2. Auth & Authorization Guard
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // Verify product exists
@@ -518,7 +518,7 @@ export const deleteAdminProduct = createServerFn({ method: "POST" })
     `;
 
     // Write Audit Log
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "product.deleted",
@@ -542,17 +542,17 @@ export const updateOrderStatus = createServerFn({ method: "POST" })
     const { orderId, status, paymentStatus, csrfToken } = data;
 
     // 1. CSRF Token Validation
-    const { validateCsrfToken } = await import("../csrf-verify.server");
+    const { validateCsrfToken } = await import("../csrf-verify-functions");
     validateCsrfToken(csrfToken);
 
     // 0. Auth & Authorization Guard (requires super_admin or admin role)
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
     if (!["super_admin", "admin"].includes(actor.role)) {
       throw new Error("Unauthorized: Only administrators can update order status");
     }
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // 1. Verify order exists before mutating
@@ -584,7 +584,7 @@ export const updateOrderStatus = createServerFn({ method: "POST" })
     }
 
     // 2. Write Audit Log
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "order.status_updated",
@@ -610,17 +610,17 @@ export const updateServiceRequestStatus = createServerFn({ method: "POST" })
     const { requestId, status, csrfToken } = data;
 
     // 1. CSRF Token Validation
-    const { validateCsrfToken } = await import("../csrf-verify.server");
+    const { validateCsrfToken } = await import("../csrf-verify-functions");
     validateCsrfToken(csrfToken);
 
     // 0. Auth & Authorization Guard (requires super_admin or admin role)
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
     if (!["super_admin", "admin"].includes(actor.role)) {
       throw new Error("Unauthorized: Only administrators can update service requests");
     }
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // 1. Verify service request exists before mutating
@@ -638,7 +638,7 @@ export const updateServiceRequestStatus = createServerFn({ method: "POST" })
     `;
 
     // 2. Write Audit Log
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "service.status_updated",
@@ -657,9 +657,9 @@ export const getMainAppUrl = createServerFn({ method: "GET" })
 
 export const getAdminUsers = createServerFn({ method: "GET" })
   .handler(async () => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     return sql`
@@ -678,9 +678,9 @@ export const createAdminUser = createServerFn({ method: "POST" })
     role: z.enum(['super_admin', 'admin', 'sales_agent', 'content_editor'])
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
     const bcrypt = await import("bcryptjs");
 
@@ -704,7 +704,7 @@ export const createAdminUser = createServerFn({ method: "POST" })
       )
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "admin.create_user",
@@ -722,9 +722,9 @@ export const updateUserRole = createServerFn({ method: "POST" })
     role: z.enum(['super_admin', 'admin', 'sales_agent', 'content_editor', 'farmer', 'retailer'])
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const { userId, role } = data;
@@ -738,7 +738,7 @@ export const updateUserRole = createServerFn({ method: "POST" })
       WHERE id = ${userId}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "user.role_updated",
@@ -755,9 +755,9 @@ export const deleteUser = createServerFn({ method: "POST" })
     userId: z.string().uuid()
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const { userId } = data;
@@ -772,7 +772,7 @@ export const deleteUser = createServerFn({ method: "POST" })
       WHERE id = ${userId}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "user.deleted",
@@ -786,9 +786,9 @@ export const deleteUser = createServerFn({ method: "POST" })
 
 export const getAdminContent = createServerFn({ method: "GET" })
   .handler(async () => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     return sql`
@@ -815,9 +815,9 @@ export const getAdminContent = createServerFn({ method: "GET" })
 
 export const getAdminBlogAuthors = createServerFn({ method: "GET" })
   .handler(async () => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     return sql`
@@ -840,9 +840,9 @@ export const createAdminBlogPost = createServerFn({ method: "POST" })
     status: z.enum(["draft", "published"]).default("draft"),
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // Generate slug from title
@@ -871,7 +871,7 @@ export const createAdminBlogPost = createServerFn({ method: "POST" })
       RETURNING id, title, slug, category, status, published_at, created_at
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "blog.created",
@@ -888,9 +888,9 @@ export const toggleContentStatus = createServerFn({ method: "POST" })
     postId: z.string().uuid()
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const { postId } = data;
@@ -906,7 +906,7 @@ export const toggleContentStatus = createServerFn({ method: "POST" })
       WHERE id = ${postId}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "blog.status_updated",
@@ -923,9 +923,9 @@ export const deleteContent = createServerFn({ method: "POST" })
     postId: z.string().uuid()
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const { postId } = data;
@@ -935,7 +935,7 @@ export const deleteContent = createServerFn({ method: "POST" })
       WHERE id = ${postId}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "blog.deleted",
@@ -959,9 +959,9 @@ export const updateAdminBlogPost = createServerFn({ method: "POST" })
     status: z.enum(["draft", "published"]).default("draft"),
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const { postId, title, category, excerpt, body, coverImage, authorId, status } = data;
@@ -988,7 +988,7 @@ export const updateAdminBlogPost = createServerFn({ method: "POST" })
       WHERE id = ${postId}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "blog.updated",
@@ -1002,9 +1002,9 @@ export const updateAdminBlogPost = createServerFn({ method: "POST" })
 
 export const getAdminForum = createServerFn({ method: "GET" })
   .handler(async () => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     return sql`
@@ -1020,9 +1020,9 @@ export const deleteForumPost = createServerFn({ method: "POST" })
     postId: z.string().uuid()
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const { postId } = data;
@@ -1032,7 +1032,7 @@ export const deleteForumPost = createServerFn({ method: "POST" })
       WHERE id = ${postId}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "forum.post_deleted",
@@ -1046,9 +1046,9 @@ export const deleteForumPost = createServerFn({ method: "POST" })
 
 export const getAdminAcademy = createServerFn({ method: "GET" })
   .handler(async () => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     return sql`
@@ -1078,9 +1078,9 @@ export const deleteAcademyCourse = createServerFn({ method: "POST" })
     courseId: z.string().uuid()
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const { courseId } = data;
@@ -1090,7 +1090,7 @@ export const deleteAcademyCourse = createServerFn({ method: "POST" })
       WHERE id = ${courseId}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "academy.course_deleted",
@@ -1117,9 +1117,9 @@ export const createAcademyCourse = createServerFn({ method: "POST" })
     has_certificate: z.boolean().default(false),
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // Auto-generate slug from title
@@ -1157,7 +1157,7 @@ export const createAcademyCourse = createServerFn({ method: "POST" })
       RETURNING id
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "academy.course_created",
@@ -1185,9 +1185,9 @@ export const updateAcademyCourse = createServerFn({ method: "POST" })
     has_certificate: z.boolean().default(false),
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const { courseId, ...fields } = data;
@@ -1210,7 +1210,7 @@ export const updateAcademyCourse = createServerFn({ method: "POST" })
       WHERE id = ${courseId}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "academy.course_updated",
@@ -1224,9 +1224,9 @@ export const updateAcademyCourse = createServerFn({ method: "POST" })
 
 export const getAdminAuditLogs = createServerFn({ method: "GET" })
   .handler(async () => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     return sql`
@@ -1240,9 +1240,9 @@ export const getAdminAuditLogs = createServerFn({ method: "GET" })
 
 export const getAdminCommodities = createServerFn({ method: "GET" })
   .handler(async () => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // Pull all commodities and their price board entries
@@ -1295,9 +1295,9 @@ export const createAdminCommodity = createServerFn({ method: "POST" })
     source: z.string().optional(),
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // Insert commodity
@@ -1315,7 +1315,7 @@ export const createAdminCommodity = createServerFn({ method: "POST" })
       `;
     }
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "commodity.created",
@@ -1335,9 +1335,9 @@ export const addCommodityPrice = createServerFn({ method: "POST" })
     source: z.string().optional(),
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const [priceEntry] = await sql`
@@ -1346,7 +1346,7 @@ export const addCommodityPrice = createServerFn({ method: "POST" })
       RETURNING id, commodity_id, region, price, source
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "commodity.price_added",
@@ -1363,9 +1363,9 @@ export const deleteCommodityPrice = createServerFn({ method: "POST" })
     priceId: z.string().uuid()
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const [existing] = await sql`
@@ -1378,7 +1378,7 @@ export const deleteCommodityPrice = createServerFn({ method: "POST" })
       WHERE id = ${data.priceId}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "commodity.price_deleted",
@@ -1395,9 +1395,9 @@ export const deleteAdminCommodity = createServerFn({ method: "POST" })
     commodityId: z.string().uuid()
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const [existing] = await sql`
@@ -1410,7 +1410,7 @@ export const deleteAdminCommodity = createServerFn({ method: "POST" })
       WHERE id = ${data.commodityId}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "commodity.deleted",
@@ -1436,9 +1436,9 @@ export const getAdminCustomers = createServerFn({ method: "GET" })
     sortOrder: z.enum(["asc", "desc"]).optional().default("desc"),
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const { page, limit, search, county, farmingType, status, role, sortBy, sortOrder } = data;
@@ -1547,9 +1547,9 @@ export const getAdminCustomerDetails = createServerFn({ method: "GET" })
     customerId: z.string().uuid()
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     // 1. Fetch customer details
@@ -1640,9 +1640,9 @@ export const updateAdminCustomerStatus = createServerFn({ method: "POST" })
     status: z.enum(["active", "suspended", "pending"]),
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const [existing] = await sql`SELECT status, full_name FROM profiles WHERE id = ${data.customerId}`;
@@ -1655,7 +1655,7 @@ export const updateAdminCustomerStatus = createServerFn({ method: "POST" })
     `;
 
     // Log to audits
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "customer.status_updated",
@@ -1681,9 +1681,9 @@ export const updateAdminCustomerDetails = createServerFn({ method: "POST" })
     status: z.enum(["active", "suspended", "pending"]),
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const [existing] = await sql`SELECT id FROM profiles WHERE id = ${data.customerId}`;
@@ -1732,7 +1732,7 @@ export const updateAdminCustomerDetails = createServerFn({ method: "POST" })
       }
     });
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "customer.details_updated",
@@ -1749,9 +1749,9 @@ export const deleteAdminCustomer = createServerFn({ method: "POST" })
     customerId: z.string().uuid()
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     if (data.customerId === actor.id) {
@@ -1774,7 +1774,7 @@ export const deleteAdminCustomer = createServerFn({ method: "POST" })
       `;
     });
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "customer.deleted",
@@ -1804,10 +1804,10 @@ function formatRelativeTime(date: Date): string {
 // Server function: Get contact inquiries
 export const getAdminInquiries = createServerFn({ method: "GET" })
   .handler(async () => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     await verifyAdminSession();
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const inquiries = await sql`
@@ -1857,10 +1857,10 @@ export const deleteAdminInquiry = createServerFn({ method: "POST" })
     id: z.string()
   }))
   .handler(async ({ data }) => {
-    const { verifyAdminSession } = await import("../auth-admin-helper.server");
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
     const actor = await verifyAdminSession();
 
-    const { getDb } = await import("../db.server");
+    const { getDb } = await import("../db-functions");
     const sql = getDb();
 
     const [existing] = await sql`SELECT id, name FROM contact_submissions WHERE id = ${data.id}`;
@@ -1871,7 +1871,7 @@ export const deleteAdminInquiry = createServerFn({ method: "POST" })
       WHERE id = ${data.id}
     `;
 
-    const { writeAuditLog } = await import("../audit.server");
+    const { writeAuditLog } = await import("../audit-functions");
     await writeAuditLog({
       actorId: actor.id,
       action: "inquiry.deleted",

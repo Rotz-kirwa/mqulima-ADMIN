@@ -40,10 +40,10 @@ import {
   getAdminInquiries,
   deleteAdminInquiry
 } from "@/lib/api/admin.functions";
-import { getAdminCurrentUser, logoutAdmin } from "@/lib/auth-admin.server";
 
 export const Route = createFileRoute("/")({
   beforeLoad: async () => {
+    const { getAdminCurrentUser } = await import("@/lib/auth-admin");
     const currentUser = await getAdminCurrentUser();
     if (!currentUser || !["super_admin", "admin"].includes(currentUser.role)) {
       throw redirect({ to: "/login" });
@@ -667,6 +667,7 @@ function AdminPanel() {
           <button
             onClick={async () => {
               try {
+                const { logoutAdmin } = await import("@/lib/auth-admin");
                 await logoutAdmin();
                 navigate({ to: "/login", replace: true });
               } catch (e) {

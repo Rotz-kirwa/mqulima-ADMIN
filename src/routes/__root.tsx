@@ -6,7 +6,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { type ReactNode } from "react";
-import { generateCsrfToken } from "../lib/csrf.server";
+import { generateCsrfToken } from "../lib/csrf";
 
 import appCss from "../styles.css?url";
 import { Toaster } from "sonner";

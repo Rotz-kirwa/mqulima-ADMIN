@@ -3,15 +3,15 @@ import { z } from "zod";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 async function getAuth() {
-  const { verifyAdminSession } = await import("../auth-admin-helper.server");
+  const { verifyAdminSession } = await import("../auth-admin-helper-functions");
   return verifyAdminSession();
 }
 async function db() {
-  const { getDb } = await import("../db.server");
+  const { getDb } = await import("../db-functions");
   return getDb();
 }
 async function audit(actorId: string, action: string, entityType: string, entityId: string, diff: object = {}) {
-  const { writeAuditLog } = await import("../audit.server");
+  const { writeAuditLog } = await import("../audit-functions");
   await writeAuditLog({ actorId, action, entityType, entityId, diff });
 }
 

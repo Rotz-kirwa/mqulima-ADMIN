@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { Lock, Mail, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { loginAdmin, getAdminCurrentUser } from "@/lib/auth-admin.server";
+import { loginAdmin, getAdminCurrentUser } from "@/lib/auth-admin";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
