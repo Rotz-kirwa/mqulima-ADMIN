@@ -1048,7 +1048,7 @@ function AdminPanel() {
                                   src={p.image} 
                                   alt={p.name} 
                                   className="h-full w-full object-contain" 
-                                  onError={e => {e.currentTarget.src = "/placeholder-product.png";}} 
+                                  onError={e => {e.currentTarget.onerror = null; e.currentTarget.src = "/placeholder-product.png";}} 
                                 />
                                 {p.isFeatured && (
                                   <div className="absolute top-2 right-2 bg-amber-500 text-amber-950 text-[9px] font-black uppercase px-2 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
@@ -1255,7 +1255,7 @@ function AdminPanel() {
                                     <td className="px-4 py-3">
                                       <div className="flex items-center gap-3">
                                         <div className="h-10 w-10 bg-gray-50 border border-gray-200 rounded p-1 overflow-hidden shrink-0 flex items-center justify-center">
-                                          <img src={p.image} alt={p.name} className="h-full w-full object-contain" onError={e => {e.currentTarget.src = "/placeholder-product.png";}} />
+                                          <img src={p.image} alt={p.name} className="h-full w-full object-contain" onError={e => {e.currentTarget.onerror = null; e.currentTarget.src = "/placeholder-product.png";}} />
                                         </div>
                                         <div className="min-w-0">
                                           <div className="font-bold text-gray-900 truncate max-w-[200px]">{p.name}</div>
@@ -2947,7 +2947,7 @@ function AdminPanel() {
                               src={item.image || "/placeholder-product.png"}
                               alt={item.name}
                               className="h-full w-full object-contain"
-                              onError={(e) => { e.currentTarget.src = "/placeholder-product.png"; }}
+                              onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/placeholder-product.png"; }}
                             />
                           </div>
                           <div className="flex-1 min-w-0">
