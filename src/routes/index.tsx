@@ -1,15 +1,16 @@
 import { createFileRoute, useNavigate, redirect } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AcademyBuilder } from "@/components/AcademyBuilder";
 import { MarketsBuilder } from "@/components/MarketsBuilder";
 import { CustomerManager } from "@/components/CustomerManager";
+import { MqulimaLogo } from "@/components/MqulimaLogo";
 import {
   LayoutDashboard, ShoppingCart, Package, Briefcase, FileText,
   Users, MessageSquare, Settings, GraduationCap, ChevronLeft,
   ChevronRight, Bell, Search, Lock, DollarSign,
   ShoppingBag, AlertCircle, Activity, LogOut, RefreshCw,
   CheckCircle2, TrendingUp, Plus, Trash2, Edit, X, Upload, Star, Eye,
-  MessageCircle, CheckCheck, Inbox, Mail
+  MessageCircle, CheckCheck, Inbox
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -38,7 +39,21 @@ import {
   getAdminBlogAuthors,
   updateAdminBlogPost,
   getAdminInquiries,
-  deleteAdminInquiry
+  deleteAdminInquiry,
+  getAdminForumPosts,
+  getAdminForumComments,
+  getAdminForumReports,
+  getAdminForumUsers,
+  getAdminForumSettings,
+  updateAdminForumSettings,
+  getAdminForumLogs,
+  moderateForumPost,
+  moderateForumComment,
+  moderateForumReport,
+  moderateForumUser,
+  removeForumUserRestriction,
+  bulkModerateForumPosts,
+  bulkModerateForumComments
 } from "@/lib/api/admin.functions";
 
 export const Route = createFileRoute("/")({
@@ -83,7 +98,34 @@ const AGRICULTURE_CATEGORIES = [
 function AdminPanel() {
   const navigate = useNavigate();
   const { adminUser } = Route.useRouteContext();
-  const [activeSection, setActiveSection] = useState("dashboard");
+  // Helper to resolve initial admin section from URL query parameter or sessionStorage
+  const getInitialAdminSection = () => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const sec = params.get("section");
+      if (sec) return sec;
+      const stored = sessionStorage.getItem("mq_admin_active_section");
+      if (stored) return stored;
+    }
+    return "dashboard";
+  };
+
+  const getInitialForumSubSection = () => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get("tab");
+      if (tab && ["posts", "comments", "reports", "users", "logs", "settings"].includes(tab)) {
+        return tab as any;
+      }
+      const stored = sessionStorage.getItem("mq_admin_forum_tab");
+      if (stored && ["posts", "comments", "reports", "users", "logs", "settings"].includes(stored)) {
+        return stored as any;
+      }
+    }
+    return "posts";
+  };
+
+  const [activeSection, setActiveSectionState] = useState(getInitialAdminSection);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -98,6 +140,71 @@ function AdminPanel() {
   const [forumList, setForumList] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [blogAuthors, setBlogAuthors] = useState<any[]>([]);
+
+  // Forum Moderation states
+  const [forumSubSection, setForumSubSectionState] = useState<"posts" | "comments" | "reports" | "users" | "logs" | "settings">(getInitialForumSubSection);
+
+  // Synchronized state setters
+  const setActiveSection = (sec: string) => {
+    setActiveSectionState(sec);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("mq_admin_active_section", sec);
+      const url = new URL(window.location.href);
+      url.searchParams.set("section", sec);
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
+
+  const setForumSubSection = (tab: "posts" | "comments" | "reports" | "users" | "logs" | "settings") => {
+    setForumSubSectionState(tab);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("mq_admin_forum_tab", tab);
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", tab);
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const handlePopState = () => {
+        const params = new URLSearchParams(window.location.search);
+        const sec = params.get("section");
+        if (sec) setActiveSectionState(sec);
+        const tab = params.get("tab");
+        if (tab && ["posts", "comments", "reports", "users", "logs", "settings"].includes(tab)) {
+          setForumSubSectionState(tab as any);
+        }
+      };
+      window.addEventListener("popstate", handlePopState);
+      return () => window.removeEventListener("popstate", handlePopState);
+    }
+  }, []);
+  const [modPosts, setModPosts] = useState<any[]>([]);
+  const [modComments, setModComments] = useState<any[]>([]);
+  const [modReports, setModReports] = useState<any[]>([]);
+  const [modUsers, setModUsers] = useState<any[]>([]);
+  const [modLogs, setModLogs] = useState<any[]>([]);
+  const [modSettings, setModSettings] = useState<any>(null);
+  const [modSearch, setModSearch] = useState("");
+  const [modStatusFilter, setModStatusFilter] = useState("all");
+  const [selectedPostIds, setSelectedPostIds] = useState<string[]>([]);
+  const [selectedCommentIds, setSelectedCommentIds] = useState<string[]>([]);
+  const [viewingAdminPost, setViewingAdminPost] = useState<any | null>(null);
+
+  // Modals state
+  const [restrictionModalOpen, setRestrictionModalOpen] = useState(false);
+  const [restrictionTargetUser, setRestrictionTargetUser] = useState<any>(null);
+  const [restrictionType, setRestrictionType] = useState<"warning" | "restricted" | "suspended" | "banned">("warning");
+  const [restrictionReason, setRestrictionReason] = useState("");
+  const [restrictionDuration, setRestrictionDuration] = useState(7);
+  const [submittingRestriction, setSubmittingRestriction] = useState(false);
+
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<any>(null);
+
+  const [newOffensiveWord, setNewOffensiveWord] = useState("");
+  const [savingSettings, setSavingSettings] = useState(false);
 
   // Inquiries State
   const [inquiries, setInquiries] = useState<any[]>([]);
@@ -226,50 +333,134 @@ function AdminPanel() {
   const [formVerified, setFormVerified] = useState(true);
   const [formIsFeatured, setFormIsFeatured] = useState(false);
 
-  // Fetch all data from local PostgreSQL
+  const refreshAllData = async (showSpinner: boolean) => {
+    if (showSpinner) setLoading(true);
+    try {
+      const [dash, ord, serv, prod, usrs, cnt, frm, aud, authors, inqs, mPosts, mComments, mReports, mUsers, mLogs, mSettings] = await Promise.all([
+        getAdminDashboardData().catch(() => null),
+        getAdminOrders().catch(() => ({ orders: [], total: 0, page: 1 })),
+        getAdminServiceRequests().catch(() => ({})),
+        getAdminProducts().catch(() => []),
+        getAdminUsers().catch(() => []),
+        getAdminContent().catch(() => []),
+        getAdminForum().catch(() => []),
+        getAdminAuditLogs().catch(() => []),
+        getAdminBlogAuthors().catch(() => []),
+        getAdminInquiries().catch(() => []),
+        getAdminForumPosts().catch(() => []),
+        getAdminForumComments().catch(() => []),
+        getAdminForumReports().catch(() => []),
+        getAdminForumUsers().catch(() => []),
+        getAdminForumLogs().catch(() => []),
+        getAdminForumSettings().catch(() => null),
+      ]);
+      setDashboardData(dash || null);
+      setOrders(Array.isArray(ord) ? ord : (ord as any)?.orders || []);
+      setServiceRequests(Array.isArray(serv) ? serv : (serv as any)?.requests || []);
+      setProducts(Array.isArray(prod) ? prod : (prod as any)?.products || []);
+      setUsersList(Array.isArray(usrs) ? usrs : (usrs as any)?.users || []);
+      setContentList(cnt || []);
+      setForumList(frm || []);
+      setAuditLogs(aud || []);
+      setModPosts(mPosts || []);
+      setModComments(mComments || []);
+      setModReports(mReports || []);
+      setModUsers(mUsers || []);
+      setModLogs(mLogs || []);
+      setModSettings(mSettings || null);
+      const authorsArr = Array.isArray(authors) ? authors : [];
+      setBlogAuthors(authorsArr);
+      if (authorsArr.length > 0) setPostAuthorId(prev => prev || authorsArr[0].id);
+      
+      const sortedInquiries = inqs || [];
+      setInquiries(sortedInquiries);
+      
+      if (sortedInquiries.length > 0) {
+        setSelectedInquiry((prev: any) => {
+          if (prev) {
+            const found = sortedInquiries.find(i => i.id === prev.id);
+            return found || sortedInquiries[0];
+          }
+          return sortedInquiries[0];
+        });
+      }
+    } catch (error: any) {
+      console.error("Failed to load admin data:", error);
+      const errMsg = error?.message || String(error);
+      if (errMsg.includes("Forbidden") || errMsg.includes("Unauthorized") || errMsg.includes("User profile not found or role modified")) {
+        try {
+          const { logoutAdmin } = await import("@/lib/auth-admin");
+          await logoutAdmin();
+        } catch (e) {}
+        navigate({ to: "/login", replace: true });
+        return;
+      }
+      if (showSpinner) {
+        toast.error("Error loading live data from database");
+      }
+    } finally {
+      if (showSpinner) setLoading(false);
+    }
+  };
+
+  const handleActionError = async (error: any, fallbackMessage: string) => {
+    const errMsg = error?.message || String(error);
+    if (errMsg.includes("Forbidden") || errMsg.includes("Unauthorized") || errMsg.includes("User profile not found or role modified")) {
+      toast.error("Session expired or unauthorized. Redirecting to login...");
+      try {
+        const { logoutAdmin } = await import("@/lib/auth-admin");
+        await logoutAdmin();
+      } catch (e) {}
+      navigate({ to: "/login", replace: true });
+      return true;
+    }
+    toast.error(fallbackMessage);
+    return false;
+  };
+
+  // Fetch all data from local PostgreSQL initially or on manual Sync
   useEffect(() => {
     if (!adminUser) return;
-    async function loadData() {
-      setLoading(true);
-      try {
-        const [dash, ord, serv, prod, usrs, cnt, frm, aud, authors, inqs] = await Promise.all([
-          getAdminDashboardData(),
-          getAdminOrders(),
-          getAdminServiceRequests(),
-          getAdminProducts(),
-          getAdminUsers(),
-          getAdminContent(),
-          getAdminForum(),
-          getAdminAuditLogs(),
-          getAdminBlogAuthors(),
-          getAdminInquiries(),
-        ]);
-        setDashboardData(dash);
-        setOrders(Array.isArray(ord) ? ord : (ord as any).orders || []);
-        setServiceRequests(serv);
-        setProducts(prod || []);
-        setUsersList(usrs || []);
-        setContentList(cnt || []);
-        setForumList(frm || []);
-        setAuditLogs(aud || []);
-        const authorsArr = Array.isArray(authors) ? authors : [];
-        setBlogAuthors(authorsArr);
-        if (authorsArr.length > 0) setPostAuthorId(authorsArr[0].id);
-        
-        const sortedInquiries = inqs || [];
-        setInquiries(sortedInquiries);
-        if (sortedInquiries.length > 0) {
-          setSelectedInquiry(sortedInquiries[0]);
-        }
-      } catch (error) {
-        console.error("Failed to load admin data:", error);
-        toast.error("Error loading live data from database");
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadData();
+    refreshAllData(true);
   }, [refreshKey, adminUser]);
+
+  // Real-time polling for full page updates (every 10 seconds)
+  useEffect(() => {
+    if (!adminUser) return;
+    const interval = setInterval(() => {
+      refreshAllData(false);
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [adminUser]);
+
+  // Toast notification for incoming inquiries
+  const prevInquiriesLength = useRef(0);
+  const isInitialInqsLoad = useRef(true);
+
+  useEffect(() => {
+    if (inquiries.length === 0) return;
+
+    if (isInitialInqsLoad.current) {
+      prevInquiriesLength.current = inquiries.length;
+      isInitialInqsLoad.current = false;
+      return;
+    }
+
+    if (inquiries.length > prevInquiriesLength.current) {
+      const diffCount = inquiries.length - prevInquiriesLength.current;
+      const latestInq = inquiries[0];
+      toast.info(`New Inquiry from ${latestInq?.name || "Visitor"}`, {
+        description: latestInq?.email ? `"${latestInq.email}" sent a message.` : `${diffCount} new customer inquiry received.`,
+        action: {
+          label: "View Inquiries",
+          onClick: () => setActiveSection("inquiries")
+        },
+        duration: 7000
+      });
+    }
+    prevInquiriesLength.current = inquiries.length;
+  }, [inquiries]);
 
   // Product management actions
   const resetForm = () => {
@@ -327,7 +518,7 @@ function AdminPanel() {
 
     try {
       const { getCsrfTokenFromCookie } = await import("@/lib/csrf-client");
-      const csrfToken = getCsrfTokenFromCookie() || "mock-csrf-token";
+      const csrfToken = getCsrfTokenFromCookie();
 
       if (editingProduct) {
         await updateAdminProduct({
@@ -397,7 +588,7 @@ function AdminPanel() {
 
     try {
       const { getCsrfTokenFromCookie } = await import("@/lib/csrf-client");
-      const csrfToken = getCsrfTokenFromCookie() || "mock-csrf-token";
+      const csrfToken = getCsrfTokenFromCookie();
 
       await deleteAdminProduct({ data: { id: productId, csrfToken } });
       toast.success("Product deleted successfully!");
@@ -412,7 +603,7 @@ function AdminPanel() {
 
     try {
       const { getCsrfTokenFromCookie } = await import("@/lib/csrf-client");
-      const csrfToken = getCsrfTokenFromCookie() || "mock-csrf-token";
+      const csrfToken = getCsrfTokenFromCookie();
 
       await updateAdminProduct({
         data: {
@@ -431,7 +622,7 @@ function AdminPanel() {
   const handleToggleFeatured = async (productId: string, currentFeatured: boolean) => {
     try {
       const { getCsrfTokenFromCookie } = await import("@/lib/csrf-client");
-      const csrfToken = getCsrfTokenFromCookie() || "mock-csrf-token";
+      const csrfToken = getCsrfTokenFromCookie();
 
       await updateAdminProduct({
         data: {
@@ -495,6 +686,125 @@ function AdminPanel() {
     }
   };
 
+  // --- FORUM MODERATION ACTION HANDLERS ---
+  const handleModeratePostAction = async (postId: string, status: string, reason?: string) => {
+    try {
+      await moderateForumPost({ data: { postId, status: status as any, reason } });
+      toast.success(`Post status updated to ${status}`);
+      refreshAllData(false);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to moderate post");
+    }
+  };
+
+  const handleModerateCommentAction = async (commentId: string, status: string, reason?: string) => {
+    try {
+      await moderateForumComment({ data: { commentId, status: status as any, reason } });
+      toast.success(`Comment status updated to ${status}`);
+      refreshAllData(false);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to moderate comment");
+    }
+  };
+
+  const handleModerateReportAction = async (reportId: string, status: string, actionTaken?: string) => {
+    try {
+      await moderateForumReport({ data: { reportId, status: status as any, actionTaken } });
+      toast.success(`Report marked as ${status}`);
+      if (selectedReport?.id === reportId) {
+        setSelectedReport((prev: any) => prev ? { ...prev, status } : null);
+      }
+      refreshAllData(false);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to update report status");
+    }
+  };
+
+  const handleApplyUserRestriction = async () => {
+    if (!restrictionTargetUser || !restrictionReason.trim()) {
+      toast.error("Please specify a clear reason for the restriction.");
+      return;
+    }
+    setSubmittingRestriction(true);
+    try {
+      await moderateForumUser({
+        data: {
+          userId: restrictionTargetUser.id,
+          restrictionType,
+          reason: restrictionReason,
+          durationDays: restrictionDuration
+        }
+      });
+      toast.success(`User restricted (${restrictionType.toUpperCase()}) successfully`);
+      setRestrictionModalOpen(false);
+      setRestrictionTargetUser(null);
+      setRestrictionReason("");
+      refreshAllData(false);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to apply restriction");
+    } finally {
+      setSubmittingRestriction(false);
+    }
+  };
+
+  const handleRemoveUserRestrictionAction = async (userId: string) => {
+    if (!confirm("Are you sure you want to lift all restrictions for this user?")) return;
+    try {
+      await removeForumUserRestriction({ data: { userId, reason: "Admin un-restricted user" } });
+      toast.success("User restrictions lifted");
+      refreshAllData(false);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to lift restriction");
+    }
+  };
+
+  const handleSaveForumSettings = async (updatedSettings: any) => {
+    setSavingSettings(true);
+    try {
+      await updateAdminForumSettings({
+        data: {
+          spamDetectionEnabled: Boolean(updatedSettings.spam_detection_enabled),
+          repeatedPostsWindowMins: Number(updatedSettings.repeated_posts_window_mins || 5),
+          blockExternalLinks: Boolean(updatedSettings.block_external_links),
+          offensiveWordsList: Array.isArray(updatedSettings.offensive_words_list) ? updatedSettings.offensive_words_list : [],
+          autoFlagReportThreshold: Number(updatedSettings.auto_flag_report_threshold || 3)
+        }
+      });
+      toast.success("Forum automated moderation settings saved successfully!");
+      refreshAllData(false);
+    } catch (error: any) {
+      toast.error(error?.message || "Failed to save moderation settings");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleBulkPostAction = async (status: string) => {
+    if (selectedPostIds.length === 0) return;
+    if (!confirm(`Are you sure you want to set ${selectedPostIds.length} posts to '${status}'?`)) return;
+    try {
+      await bulkModerateForumPosts({ data: { postIds: selectedPostIds, status: status as any } });
+      toast.success(`Selected posts updated to ${status}`);
+      setSelectedPostIds([]);
+      refreshAllData(false);
+    } catch (error: any) {
+      toast.error(error?.message || "Bulk post action failed");
+    }
+  };
+
+  const handleBulkCommentAction = async (status: string) => {
+    if (selectedCommentIds.length === 0) return;
+    if (!confirm(`Are you sure you want to set ${selectedCommentIds.length} comments to '${status}'?`)) return;
+    try {
+      await bulkModerateForumComments({ data: { commentIds: selectedCommentIds, status: status as any } });
+      toast.success(`Selected comments updated to ${status}`);
+      setSelectedCommentIds([]);
+      refreshAllData(false);
+    } catch (error: any) {
+      toast.error(error?.message || "Bulk comment action failed");
+    }
+  };
+
   // Handle Content actions
   const handleToggleContentStatus = async (postId: string) => {
     try {
@@ -513,7 +823,7 @@ function AdminPanel() {
       toast.success("Article deleted");
       setRefreshKey(prev => prev + 1);
     } catch (error) {
-      toast.error("Failed to delete article");
+      handleActionError(error, "Failed to delete article");
     }
   };
 
@@ -525,7 +835,7 @@ function AdminPanel() {
       toast.success("Forum post deleted");
       setRefreshKey(prev => prev + 1);
     } catch (error) {
-      toast.error("Failed to delete forum post");
+      handleActionError(error, "Failed to delete forum post");
     }
   };
 
@@ -583,7 +893,7 @@ function AdminPanel() {
         <div>
           {/* Logo */}
           <div className="px-4 py-5 border-b border-[#2D6A4F]/20 flex items-center gap-3">
-            <div className="h-9 w-9 bg-[#2D6A4F] flex items-center justify-center border border-[#F5A623] text-white font-bold text-lg shrink-0">M</div>
+            <MqulimaLogo size={36} className="shrink-0" />
             {!sidebarCollapsed && (
               <div className="min-w-0">
                 <h1 className="text-xs font-extrabold tracking-widest uppercase text-[#F5A623]">Admin Console</h1>
@@ -611,27 +921,59 @@ function AdminPanel() {
             ].map((item) => {
               const Icon = item.icon;
               const isActive = activeSection === item.id;
+              const unreadInquiriesCount = inquiries.filter(inq => !readInquiryIds.includes(inq.id)).length;
+              const pendingOrdersCount = orders.filter(o => o.status === "pending").length;
+              const pendingReportsCount = modReports.filter(r => r.status === "pending").length;
+
               return (
                 <button
                   key={item.id}
                   onClick={() => setActiveSection(item.id)}
                   title={sidebarCollapsed ? item.label : undefined}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition cursor-pointer relative ${
                     isActive
                       ? "bg-[#2D6A4F] text-white shadow-md"
                       : "text-white/60 hover:bg-[#2D6A4F]/20 hover:text-white"
                   }`}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
+                  <div className="relative flex items-center justify-center">
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {/* Collapsed dot for inquiries */}
+                    {item.id === "inquiries" && sidebarCollapsed && unreadInquiriesCount > 0 && (
+                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 border border-[#0A0F0D] animate-ping" />
+                    )}
+                    {item.id === "inquiries" && sidebarCollapsed && unreadInquiriesCount > 0 && (
+                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 border border-[#0A0F0D]" />
+                    )}
+                    {/* Collapsed dot for orders */}
+                    {item.id === "orders" && sidebarCollapsed && pendingOrdersCount > 0 && (
+                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-[#F5A623] border border-[#0A0F0D] animate-ping" />
+                    )}
+                    {item.id === "orders" && sidebarCollapsed && pendingOrdersCount > 0 && (
+                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-[#F5A623] border border-[#0A0F0D]" />
+                    )}
+                    {/* Collapsed dot for forum reports */}
+                    {item.id === "forum" && sidebarCollapsed && pendingReportsCount > 0 && (
+                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-red-500 border border-[#0A0F0D] animate-ping" />
+                    )}
+                    {item.id === "forum" && sidebarCollapsed && pendingReportsCount > 0 && (
+                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-red-500 border border-[#0A0F0D]" />
+                    )}
+                  </div>
                   {!sidebarCollapsed && <span>{item.label}</span>}
-                  {item.id === "orders" && !sidebarCollapsed && orders.filter(o => o.status === "pending").length > 0 && (
-                    <span className="ml-auto bg-[#F5A623] text-[#0A0F0D] text-[9px] font-black px-1.5 py-0.5 rounded-full">
-                      {orders.filter(o => o.status === "pending").length}
+                  {item.id === "orders" && !sidebarCollapsed && pendingOrdersCount > 0 && (
+                    <span className="ml-auto bg-[#F5A623] text-[#0A0F0D] text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse shadow-sm">
+                      {pendingOrdersCount}
                     </span>
                   )}
-                  {item.id === "inquiries" && !sidebarCollapsed && inquiries.filter(inq => !readInquiryIds.includes(inq.id)).length > 0 && (
-                    <span className="ml-auto bg-amber-400 text-amber-950 text-[9px] font-black px-1.5 py-0.5 rounded-full">
-                      {inquiries.filter(inq => !readInquiryIds.includes(inq.id)).length}
+                  {item.id === "inquiries" && !sidebarCollapsed && unreadInquiriesCount > 0 && (
+                    <span className="ml-auto bg-amber-400 text-amber-950 text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse shadow-sm">
+                      {unreadInquiriesCount}
+                    </span>
+                  )}
+                  {item.id === "forum" && !sidebarCollapsed && pendingReportsCount > 0 && (
+                    <span className="ml-auto bg-red-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse shadow-sm">
+                      {pendingReportsCount}
                     </span>
                   )}
                 </button>
@@ -852,7 +1194,7 @@ function AdminPanel() {
                     </div>
 
                     {/* Orders table */}
-                    <div className="bg-white rounded-xl border border-gray-100 shadow-xs overflow-hidden">
+                    <div className="bg-white rounded-xl border border-gray-100 shadow-xs overflow-x-auto">
                       <table className="w-full text-xs text-left">
                         <thead className="bg-gray-50 border-b border-gray-100">
                           <tr>
@@ -1064,9 +1406,9 @@ function AdminPanel() {
                                 </div>
                                 <div className="mt-4 flex items-center justify-between pt-3 border-t border-gray-100">
                                   <div className="text-left">
-                                    <span className="text-[9px] text-gray-400 block uppercase font-bold">Price</span>
-                                    <span className="text-sm font-black text-[#2D6A4F]">KES {p.price.toLocaleString()}</span>
-                                  </div>
+                                     <span className="text-[9px] text-[#2D6A4F] block uppercase font-extrabold tracking-wider">Showcase Card</span>
+                                     <span className="text-[10px] font-bold text-gray-500">Image & Title Showcase</span>
+                                   </div>
                                   <div className="flex items-center gap-1.5">
                                     <button
                                       onClick={() => {
@@ -1741,58 +2083,1094 @@ function AdminPanel() {
                   </div>
                 )}
 
-                {/* FORUM MODERATION */}
+                {/* FORUM MODERATION & MANAGEMENT SYSTEM */}
                 {activeSection === "forum" && (
                   <div className="space-y-6">
-                    <div>
-                      <h2 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "Playfair Display, serif" }}>Forum Moderation</h2>
-                      <p className="text-xs text-gray-500 mt-1">Review community stories, learning notes, and crop tragedy feeds</p>
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <h2 className="text-2xl font-bold text-gray-900" style={{ fontFamily: "Playfair Display, serif" }}>
+                          Forum Management & Moderation
+                        </h2>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Enforce community guidelines, manage flagged content, review reports, and configure automated moderation filters.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => refreshAllData(true)}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-bold transition cursor-pointer self-start sm:self-auto"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" /> Refresh Data
+                      </button>
                     </div>
 
-                    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-xs">
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="border-b border-gray-100 bg-gray-50 text-[10px] uppercase tracking-wider text-gray-400 font-bold">
-                              <th className="py-3 px-4">Author</th>
-                              <th className="py-3 px-4">Type</th>
-                              <th className="py-3 px-4">Title / Caption</th>
-                              <th className="py-3 px-4">Likes</th>
-                              <th className="py-3 px-4">Created At</th>
-                              <th className="py-3 px-4 text-right">Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-50 text-xs text-gray-600">
-                            {forumList.length === 0 ? (
-                              <tr>
-                                <td colSpan={6} className="py-12 text-center text-gray-400 italic">No community posts found in database</td>
-                              </tr>
-                            ) : (
-                              forumList.map((post: any) => (
-                                <tr key={post.id} className="hover:bg-gray-50/50">
-                                  <td className="py-3.5 px-4 font-semibold text-gray-900">{post.author_name || "Unknown Farmer"}</td>
-                                  <td className="py-3.5 px-4"><span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold capitalize">{post.type}</span></td>
-                                  <td className="py-3.5 px-4 max-w-xs truncate">
-                                    <div className="font-medium text-gray-800">{post.title || "No Title"}</div>
-                                    <div className="text-[10px] text-gray-400 truncate">{post.caption || "No caption"}</div>
-                                  </td>
-                                  <td className="py-3.5 px-4 font-bold text-gray-500">{post.like_count || 0}</td>
-                                  <td className="py-3.5 px-4 text-gray-400 font-mono text-[10px]">{new Date(post.created_at).toLocaleDateString()}</td>
-                                  <td className="py-3.5 px-4 text-right">
-                                    <button
-                                      onClick={() => handleDeleteForumPost(post.id)}
-                                      className="text-xs text-red-500 hover:underline font-bold cursor-pointer"
-                                    >
-                                      Remove Post
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))
+                    {/* Sub-section Navigation Tabs */}
+                    <div className="flex items-center gap-2 border-b border-gray-200 overflow-x-auto pb-2">
+                      {[
+                        { id: "posts", label: "Posts Moderation", icon: MessageSquare, badge: modPosts.filter(p => p.status === "flagged" || p.status === "pending").length },
+                        { id: "comments", label: "Comments Moderation", icon: MessageCircle, badge: modComments.filter(c => c.status === "flagged" || c.status === "pending").length },
+                        { id: "reports", label: "User Reports", icon: AlertCircle, badge: modReports.filter(r => r.status === "pending").length, badgeColor: "bg-red-500 text-white" },
+                        { id: "users", label: "Users Management", icon: Users, badge: modUsers.filter(u => u.restriction_status && u.restriction_status !== "active").length },
+                        { id: "logs", label: "Moderation Logs", icon: Activity },
+                        { id: "settings", label: "Forum Settings", icon: Settings },
+                      ].map(tab => {
+                        const Icon = tab.icon;
+                        const isActive = forumSubSection === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            onClick={() => {
+                              setForumSubSection(tab.id as any);
+                              setModSearch("");
+                              setModStatusFilter("all");
+                            }}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+                              isActive
+                                ? "bg-[#2D6A4F] text-white shadow-xs"
+                                : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                            }`}
+                          >
+                            <Icon className="h-4 w-4" />
+                            <span>{tab.label}</span>
+                            {Boolean(tab.badge && tab.badge > 0) && (
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${tab.badgeColor || (isActive ? "bg-white/20 text-white" : "bg-gray-200 text-gray-800")}`}>
+                                {tab.badge}
+                              </span>
                             )}
-                          </tbody>
-                        </table>
-                      </div>
+                          </button>
+                        );
+                      })}
                     </div>
+
+                    {/* SUB-SECTION 1: POSTS MODERATION */}
+                    {forumSubSection === "posts" && (
+                      <div className="space-y-4">
+                        {/* Filters & Actions */}
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-gray-100 shadow-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-bold text-gray-400 mr-1">Status:</span>
+                            {["all", "published", "pending", "flagged", "hidden", "deleted", "archived"].map(st => (
+                              <button
+                                key={st}
+                                onClick={() => setModStatusFilter(st)}
+                                className={`px-3 py-1 rounded-lg text-xs font-bold capitalize cursor-pointer transition ${
+                                  modStatusFilter === st
+                                    ? "bg-[#2D6A4F] text-white"
+                                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                }`}
+                              >
+                                {st}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="relative">
+                              <Search className="h-4 w-4 absolute left-3 top-2.5 text-gray-400" />
+                              <input
+                                type="text"
+                                value={modSearch}
+                                onChange={e => setModSearch(e.target.value)}
+                                placeholder="Search post title, author..."
+                                className="pl-9 pr-3 py-2 text-xs border border-gray-200 rounded-xl outline-none focus:border-[#2D6A4F] w-60"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Bulk Action Bar */}
+                        {selectedPostIds.length > 0 && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between">
+                            <span className="text-xs font-bold text-amber-900">
+                              {selectedPostIds.length} posts selected
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => handleBulkPostAction("published")} className="px-3 py-1 bg-green-600 text-white rounded-lg text-xs font-bold hover:bg-green-700 cursor-pointer">
+                                Approve Selected
+                              </button>
+                              <button onClick={() => handleBulkPostAction("hidden")} className="px-3 py-1 bg-gray-600 text-white rounded-lg text-xs font-bold hover:bg-gray-700 cursor-pointer">
+                                Hide Selected
+                              </button>
+                              <button onClick={() => handleBulkPostAction("flagged")} className="px-3 py-1 bg-amber-600 text-white rounded-lg text-xs font-bold hover:bg-amber-700 cursor-pointer">
+                                Flag Selected
+                              </button>
+                              <button onClick={() => handleBulkPostAction("deleted")} className="px-3 py-1 bg-red-600 text-white rounded-lg text-xs font-bold hover:bg-red-700 cursor-pointer">
+                                Delete Selected
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Posts Table */}
+                        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-xs">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="border-b border-gray-100 bg-gray-50 text-[10px] uppercase tracking-wider text-gray-400 font-bold">
+                                  <th className="py-3 px-4 w-10">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedPostIds.length > 0 && selectedPostIds.length === modPosts.length}
+                                      onChange={e => {
+                                        if (e.target.checked) setSelectedPostIds(modPosts.map(p => p.id));
+                                        else setSelectedPostIds([]);
+                                      }}
+                                      className="rounded text-[#2D6A4F] focus:ring-0 cursor-pointer"
+                                    />
+                                  </th>
+                                  <th className="py-3 px-4">Author</th>
+                                  <th className="py-3 px-4">Post Title & Caption</th>
+                                  <th className="py-3 px-4">Category</th>
+                                  <th className="py-3 px-4">Metrics</th>
+                                  <th className="py-3 px-4">Reports</th>
+                                  <th className="py-3 px-4">Status</th>
+                                  <th className="py-3 px-4 text-right">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50 text-xs text-gray-600">
+                                {modPosts
+                                  .filter(p => {
+                                    const pStatus = p.status || "published";
+                                    if (modStatusFilter !== "all" && pStatus !== modStatusFilter) return false;
+                                    if (modSearch.trim()) {
+                                      const q = modSearch.toLowerCase();
+                                      return (
+                                        (p.title || "").toLowerCase().includes(q) || 
+                                        (p.caption || "").toLowerCase().includes(q) ||
+                                        (p.body || "").toLowerCase().includes(q) ||
+                                        (p.author_name || "").toLowerCase().includes(q) ||
+                                        (p.author_username || p.author_handle || "").toLowerCase().includes(q)
+                                      );
+                                    }
+                                    return true;
+                                  })
+                                  .map(post => (
+                                    <tr key={post.id} className="hover:bg-gray-50/50">
+                                      <td className="py-3.5 px-4">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedPostIds.includes(post.id)}
+                                          onChange={e => {
+                                            if (e.target.checked) setSelectedPostIds(prev => [...prev, post.id]);
+                                            else setSelectedPostIds(prev => prev.filter(id => id !== post.id));
+                                          }}
+                                          className="rounded text-[#2D6A4F] focus:ring-0 cursor-pointer"
+                                        />
+                                      </td>
+                                      <td className="py-3.5 px-4">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-8 h-8 rounded-full bg-[#2D6A4F]/10 text-[#2D6A4F] flex items-center justify-center font-bold text-xs overflow-hidden">
+                                            {post.author_avatar ? (
+                                              <img src={post.author_avatar} className="w-full h-full object-cover" />
+                                            ) : (
+                                              (post.author_name || "U")[0].toUpperCase()
+                                            )}
+                                          </div>
+                                          <div>
+                                            <div className="font-bold text-gray-900">{post.author_name || "Unknown Farmer"}</div>
+                                            <div className="text-[10px] text-gray-400">@{post.author_username || post.author_handle || "user"}</div>
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td 
+                                        className="py-3.5 px-4 max-w-xs cursor-pointer group hover:bg-emerald-50/40 rounded-xl transition" 
+                                        onClick={() => setViewingAdminPost(post)}
+                                        title="Click to view full post details & comments"
+                                      >
+                                        <div className="font-bold text-gray-800 group-hover:text-[#2D6A4F] transition truncate">
+                                          {post.title || post.caption || post.body || "Untitled Post"}
+                                        </div>
+                                        <div className="text-[10px] text-gray-400 truncate">{post.caption || post.body || "No caption text"}</div>
+                                      </td>
+                                      <td className="py-3.5 px-4">
+                                        <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded text-[10px] font-bold capitalize">
+                                          {post.category || post.type || "General"}
+                                        </span>
+                                      </td>
+                                      <td className="py-3.5 px-4 text-[10px] font-medium text-gray-500">
+                                        <div>👁️ {post.views_count || post.views || 0} views</div>
+                                        <div>❤️ {post.likes_count || post.likes || 0} likes • 💬 {post.comments_count || post.comments || 0}</div>
+                                      </td>
+                                      <td className="py-3.5 px-4">
+                                        {(post.reports_count || 0) > 0 ? (
+                                          <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-black">
+                                            ⚠️ {post.reports_count} Reports
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-300 text-[10px]">0</span>
+                                        )}
+                                      </td>
+                                      <td className="py-3.5 px-4">
+                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                          post.status === "published" ? "bg-green-100 text-green-800" :
+                                          post.status === "flagged" ? "bg-amber-100 text-amber-800 animate-pulse" :
+                                          post.status === "pending" ? "bg-blue-100 text-blue-800" :
+                                          post.status === "hidden" ? "bg-gray-100 text-gray-600" :
+                                          "bg-red-100 text-red-800"
+                                        }`}>
+                                          {post.status || "published"}
+                                        </span>
+                                      </td>
+                                      <td className="py-3.5 px-4 text-right">
+                                        <div className="flex items-center justify-end gap-1.5">
+                                          <button
+                                            onClick={() => setViewingAdminPost(post)}
+                                            title="View Entire Post & Comments"
+                                            className="px-2 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-xs font-bold cursor-pointer transition flex items-center gap-1 shrink-0"
+                                          >
+                                            <Eye className="w-3.5 h-3.5" />
+                                            <span>View</span>
+                                          </button>
+                                          {post.status !== "published" && (
+                                            <button
+                                              onClick={() => handleModeratePostAction(post.id, "published")}
+                                              title="Approve Post"
+                                              className="p-1.5 bg-green-50 text-green-700 hover:bg-green-100 rounded-lg text-xs font-bold cursor-pointer transition"
+                                            >
+                                              Approve
+                                            </button>
+                                          )}
+                                          {post.status !== "hidden" && (
+                                            <button
+                                              onClick={() => handleModeratePostAction(post.id, "hidden")}
+                                              title="Hide Post"
+                                              className="p-1.5 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-xs font-bold cursor-pointer transition"
+                                            >
+                                              Hide
+                                            </button>
+                                          )}
+                                          {post.status !== "flagged" && (
+                                            <button
+                                              onClick={() => handleModeratePostAction(post.id, "flagged")}
+                                              title="Flag Post"
+                                              className="p-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg text-xs font-bold cursor-pointer transition"
+                                            >
+                                              Flag
+                                            </button>
+                                          )}
+                                          <button
+                                            onClick={() => handleModeratePostAction(post.id, "deleted")}
+                                            title="Delete Post"
+                                            className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-bold cursor-pointer transition"
+                                          >
+                                            Delete
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              setRestrictionTargetUser({ id: post.author_id, name: post.author_name });
+                                              setRestrictionModalOpen(true);
+                                            }}
+                                            title="Restrict Author"
+                                            className="p-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-lg text-xs font-bold cursor-pointer transition"
+                                          >
+                                            Restrict User
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SUB-SECTION 2: COMMENTS MODERATION */}
+                    {forumSubSection === "comments" && (
+                      <div className="space-y-4">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-gray-100 shadow-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-bold text-gray-400 mr-1">Status:</span>
+                            {["all", "published", "pending", "flagged", "hidden", "deleted"].map(st => (
+                              <button
+                                key={st}
+                                onClick={() => setModStatusFilter(st)}
+                                className={`px-3 py-1 rounded-lg text-xs font-bold capitalize cursor-pointer transition ${
+                                  modStatusFilter === st
+                                    ? "bg-[#2D6A4F] text-white"
+                                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                }`}
+                              >
+                                {st}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="relative">
+                            <Search className="h-4 w-4 absolute left-3 top-2.5 text-gray-400" />
+                            <input
+                              type="text"
+                              value={modSearch}
+                              onChange={e => setModSearch(e.target.value)}
+                              placeholder="Search comment content..."
+                              className="pl-9 pr-3 py-2 text-xs border border-gray-200 rounded-xl outline-none focus:border-[#2D6A4F] w-60"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-xs">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="border-b border-gray-100 bg-gray-50 text-[10px] uppercase tracking-wider text-gray-400 font-bold">
+                                  <th className="py-3 px-4">Author</th>
+                                  <th className="py-3 px-4">Comment Content</th>
+                                  <th className="py-3 px-4">Post Context</th>
+                                  <th className="py-3 px-4">Reports</th>
+                                  <th className="py-3 px-4">Status</th>
+                                  <th className="py-3 px-4 text-right">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50 text-xs text-gray-600">
+                                {modComments
+                                  .filter(c => {
+                                    if (modStatusFilter !== "all" && c.status !== modStatusFilter) return false;
+                                    if (modSearch.trim()) {
+                                      const q = modSearch.toLowerCase();
+                                      return (c.content || c.body || "").toLowerCase().includes(q) || (c.author_name || "").toLowerCase().includes(q);
+                                    }
+                                    return true;
+                                  })
+                                  .map(comment => (
+                                    <tr key={comment.id} className="hover:bg-gray-50/50">
+                                      <td className="py-3.5 px-4 font-bold text-gray-900">{comment.author_name || "Unknown"}</td>
+                                      <td className="py-3.5 px-4 max-w-md">
+                                        <p className="text-gray-800 font-medium line-clamp-2">{comment.content || comment.body}</p>
+                                        <span className="text-[9px] text-gray-400 font-mono">{new Date(comment.created_at).toLocaleString()}</span>
+                                      </td>
+                                      <td 
+                                        className="py-3.5 px-4 max-w-xs truncate text-emerald-700 font-bold hover:underline cursor-pointer"
+                                        onClick={() => {
+                                          const parentPost = modPosts.find(p => p.id === comment.post_id);
+                                          if (parentPost) setViewingAdminPost(parentPost);
+                                          else toast.info("Parent post context unavailable.");
+                                        }}
+                                        title="View parent post details"
+                                      >
+                                        {comment.post_title || `Post #${comment.post_id?.slice(0, 8)}`}
+                                      </td>
+                                      <td className="py-3.5 px-4">
+                                        {(comment.reports_count || 0) > 0 ? (
+                                          <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-black">
+                                            ⚠️ {comment.reports_count} Reports
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-300 text-[10px]">0</span>
+                                        )}
+                                      </td>
+                                      <td className="py-3.5 px-4">
+                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                          comment.status === "published" ? "bg-green-100 text-green-800" :
+                                          comment.status === "flagged" ? "bg-amber-100 text-amber-800" :
+                                          "bg-red-100 text-red-800"
+                                        }`}>
+                                          {comment.status || "published"}
+                                        </span>
+                                      </td>
+                                      <td className="py-3.5 px-4 text-right">
+                                        <div className="flex items-center justify-end gap-1.5">
+                                          {comment.status !== "published" && (
+                                            <button onClick={() => handleModerateCommentAction(comment.id, "published")} className="px-2 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded text-xs font-bold cursor-pointer">
+                                              Approve
+                                            </button>
+                                          )}
+                                          {comment.status !== "hidden" && (
+                                            <button onClick={() => handleModerateCommentAction(comment.id, "hidden")} className="px-2 py-1 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded text-xs font-bold cursor-pointer">
+                                              Hide
+                                            </button>
+                                          )}
+                                          <button onClick={() => handleModerateCommentAction(comment.id, "deleted")} className="px-2 py-1 bg-red-50 text-red-600 hover:bg-red-100 rounded text-xs font-bold cursor-pointer">
+                                            Delete
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SUB-SECTION 3: USER REPORTS */}
+                    {forumSubSection === "reports" && (
+                      <div className="space-y-4">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-gray-100 shadow-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-gray-400">Filter Status:</span>
+                            {["all", "pending", "dismissed", "resolved"].map(st => (
+                              <button
+                                key={st}
+                                onClick={() => setModStatusFilter(st)}
+                                className={`px-3 py-1 rounded-lg text-xs font-bold capitalize cursor-pointer transition ${
+                                  modStatusFilter === st ? "bg-[#2D6A4F] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                }`}
+                              >
+                                {st}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-xs">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="border-b border-gray-100 bg-gray-50 text-[10px] uppercase tracking-wider text-gray-400 font-bold">
+                                  <th className="py-3 px-4">Reporter</th>
+                                  <th className="py-3 px-4">Content Type</th>
+                                  <th className="py-3 px-4">Report Details / Reason</th>
+                                  <th className="py-3 px-4">Reported At</th>
+                                  <th className="py-3 px-4">Status</th>
+                                  <th className="py-3 px-4 text-right">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50 text-xs text-gray-600">
+                                {modReports
+                                  .filter(r => modStatusFilter === "all" || r.status === modStatusFilter)
+                                  .map(report => (
+                                    <tr key={report.id} className="hover:bg-gray-50/50">
+                                      <td className="py-3.5 px-4 font-bold text-gray-900">{report.reporter_name || "Anonymous User"}</td>
+                                      <td className="py-3.5 px-4">
+                                        <span className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded text-[10px] font-bold capitalize">
+                                          {report.content_type}
+                                        </span>
+                                      </td>
+                                      <td className="py-3.5 px-4 max-w-sm">
+                                        <div className="font-bold text-gray-800">{report.reason}</div>
+                                        {report.details && <div className="text-[10px] text-gray-400 italic mt-0.5">{report.details}</div>}
+                                      </td>
+                                      <td className="py-3.5 px-4 text-gray-400 font-mono text-[10px]">{new Date(report.created_at).toLocaleString()}</td>
+                                      <td className="py-3.5 px-4">
+                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                          report.status === "pending" ? "bg-red-100 text-red-800 animate-pulse" :
+                                          report.status === "resolved" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"
+                                        }`}>
+                                          {report.status}
+                                        </span>
+                                      </td>
+                                      <td className="py-3.5 px-4 text-right">
+                                        <div className="flex items-center justify-end gap-1.5">
+                                          <button
+                                            onClick={() => {
+                                              setSelectedReport(report);
+                                              setReportModalOpen(true);
+                                            }}
+                                            className="px-2.5 py-1 bg-[#2D6A4F] text-white rounded text-xs font-bold cursor-pointer"
+                                          >
+                                            Review Details
+                                          </button>
+                                          {report.status === "pending" && (
+                                            <>
+                                              <button onClick={() => handleModerateReportAction(report.id, "resolved", "Resolved by admin")} className="px-2 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded text-xs font-bold cursor-pointer">
+                                                Resolve
+                                              </button>
+                                              <button onClick={() => handleModerateReportAction(report.id, "dismissed", "Dismissed - No violation")} className="px-2 py-1 bg-gray-100 text-gray-600 hover:bg-gray-200 rounded text-xs font-bold cursor-pointer">
+                                                Dismiss
+                                              </button>
+                                            </>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SUB-SECTION 4: USERS MANAGEMENT */}
+                    {forumSubSection === "users" && (
+                      <div className="space-y-4">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-gray-100 shadow-xs">
+                          <div className="relative">
+                            <Search className="h-4 w-4 absolute left-3 top-2.5 text-gray-400" />
+                            <input
+                              type="text"
+                              value={modSearch}
+                              onChange={e => setModSearch(e.target.value)}
+                              placeholder="Search forum users by name or handle..."
+                              className="pl-9 pr-3 py-2 text-xs border border-gray-200 rounded-xl outline-none focus:border-[#2D6A4F] w-72"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-xs">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="border-b border-gray-100 bg-gray-50 text-[10px] uppercase tracking-wider text-gray-400 font-bold">
+                                  <th className="py-3 px-4">User</th>
+                                  <th className="py-3 px-4">Reputation / Role</th>
+                                  <th className="py-3 px-4">Posts</th>
+                                  <th className="py-3 px-4">Comments</th>
+                                  <th className="py-3 px-4">Reports Received</th>
+                                  <th className="py-3 px-4">Restriction Status</th>
+                                  <th className="py-3 px-4 text-right">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50 text-xs text-gray-600">
+                                {modUsers
+                                  .filter(u => {
+                                    if (modSearch.trim()) {
+                                      const q = modSearch.toLowerCase();
+                                      return (u.full_name || "").toLowerCase().includes(q) || (u.username || "").toLowerCase().includes(q);
+                                    }
+                                    return true;
+                                  })
+                                  .map(user => (
+                                    <tr key={user.id} className="hover:bg-gray-50/50">
+                                      <td className="py-3.5 px-4 font-bold text-gray-900">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-8 h-8 rounded-full bg-[#2D6A4F]/10 text-[#2D6A4F] flex items-center justify-center font-bold text-xs overflow-hidden">
+                                            {user.avatar_url ? <img src={user.avatar_url} className="w-full h-full object-cover" /> : (user.full_name || "U")[0]}
+                                          </div>
+                                          <div>
+                                            <div>{user.full_name || "Unknown User"}</div>
+                                            <div className="text-[10px] text-gray-400">@{user.username || "user"}</div>
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="py-3.5 px-4">
+                                        <div className="font-bold text-[#2D6A4F]">⭐ {user.reputation_score || 0} pts</div>
+                                        <div className="text-[10px] text-gray-400 capitalize">{user.role || "farmer"}</div>
+                                      </td>
+                                      <td className="py-3.5 px-4 font-bold text-gray-700">{user.posts_count || 0}</td>
+                                      <td className="py-3.5 px-4 font-bold text-gray-700">{user.comments_count || 0}</td>
+                                      <td className="py-3.5 px-4">
+                                        {(user.reports_against_count || 0) > 0 ? (
+                                          <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-black">
+                                            ⚠️ {user.reports_against_count}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-400">0</span>
+                                        )}
+                                      </td>
+                                      <td className="py-3.5 px-4">
+                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                          !user.restriction_status || user.restriction_status === "active" ? "bg-green-100 text-green-800" :
+                                          user.restriction_status === "warned" ? "bg-amber-100 text-amber-800" :
+                                          user.restriction_status === "restricted" ? "bg-orange-100 text-orange-800" :
+                                          "bg-red-100 text-red-800"
+                                        }`}>
+                                          {user.restriction_status || "active"}
+                                        </span>
+                                      </td>
+                                      <td className="py-3.5 px-4 text-right">
+                                        <div className="flex items-center justify-end gap-1.5">
+                                          <button
+                                            onClick={() => {
+                                              setRestrictionTargetUser(user);
+                                              setRestrictionModalOpen(true);
+                                            }}
+                                            className="px-2.5 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-xs font-bold cursor-pointer"
+                                          >
+                                            Apply Restriction
+                                          </button>
+                                          {user.restriction_status && user.restriction_status !== "active" && (
+                                            <button
+                                              onClick={() => handleRemoveUserRestrictionAction(user.id)}
+                                              className="px-2 py-1 bg-green-50 text-green-700 hover:bg-green-100 rounded text-xs font-bold cursor-pointer"
+                                            >
+                                              Lift Ban
+                                            </button>
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SUB-SECTION 5: MODERATION LOGS */}
+                    {forumSubSection === "logs" && (
+                      <div className="space-y-4">
+                        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-xs">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="border-b border-gray-100 bg-gray-50 text-[10px] uppercase tracking-wider text-gray-400 font-bold">
+                                  <th className="py-3 px-4">Admin</th>
+                                  <th className="py-3 px-4">Action</th>
+                                  <th className="py-3 px-4">Target Type</th>
+                                  <th className="py-3 px-4">Reason / Notes</th>
+                                  <th className="py-3 px-4">Timestamp</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50 text-xs text-gray-600">
+                                {modLogs.map((log: any) => (
+                                  <tr key={log.id} className="hover:bg-gray-50/50">
+                                    <td className="py-3.5 px-4 font-bold text-gray-900">{log.admin_name || "System"}</td>
+                                    <td className="py-3.5 px-4">
+                                      <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black uppercase">
+                                        {log.action_type || log.action}
+                                      </span>
+                                    </td>
+                                    <td className="py-3.5 px-4 capitalize font-medium text-gray-700">{log.target_type}</td>
+                                    <td className="py-3.5 px-4 max-w-sm text-gray-600">{log.reason || "No details provided"}</td>
+                                    <td className="py-3.5 px-4 text-gray-400 font-mono text-[10px]">{new Date(log.created_at).toLocaleString()}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SUB-SECTION 6: FORUM SETTINGS */}
+                    {forumSubSection === "settings" && modSettings && (
+                      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-xs space-y-6 max-w-3xl">
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-900">Automated Content Moderation Settings</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Configure system rules for automatic filtering, link blocking, and report escalation.</p>
+                        </div>
+
+                        <div className="space-y-4 divide-y divide-gray-100">
+                          {/* Spam Toggle */}
+                          <div className="flex items-center justify-between pt-4">
+                            <div>
+                              <div className="text-xs font-bold text-gray-900">Automated Spam Detection</div>
+                              <div className="text-[10px] text-gray-500">Automatically flag users submitting repeated posts in a short duration</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setModSettings((s: any) => ({ ...s, spam_detection_enabled: !s.spam_detection_enabled }))}
+                              className={`relative w-11 h-6 rounded-full transition-colors ${modSettings.spam_detection_enabled ? "bg-[#2D6A4F]" : "bg-gray-300"}`}
+                            >
+                              <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${modSettings.spam_detection_enabled ? "translate-x-5" : ""}`} />
+                            </button>
+                          </div>
+
+                          {/* Link Blocking Toggle */}
+                          <div className="flex items-center justify-between pt-4">
+                            <div>
+                              <div className="text-xs font-bold text-gray-900">Block External Links in Posts</div>
+                              <div className="text-[10px] text-gray-500">Automatically flag posts containing suspicious external URL links</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setModSettings((s: any) => ({ ...s, block_external_links: !s.block_external_links }))}
+                              className={`relative w-11 h-6 rounded-full transition-colors ${modSettings.block_external_links ? "bg-[#2D6A4F]" : "bg-gray-300"}`}
+                            >
+                              <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${modSettings.block_external_links ? "translate-x-5" : ""}`} />
+                            </button>
+                          </div>
+
+                          {/* Report Threshold */}
+                          <div className="pt-4 space-y-1">
+                            <label className="block text-xs font-bold text-gray-900">Auto-Flag Report Threshold</label>
+                            <span className="block text-[10px] text-gray-500">Number of user reports required to automatically set post status to 'Flagged'</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={20}
+                              value={modSettings.auto_flag_report_threshold || 3}
+                              onChange={e => setModSettings((s: any) => ({ ...s, auto_flag_report_threshold: Number(e.target.value) }))}
+                              className="w-32 border border-gray-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#2D6A4F]"
+                            />
+                          </div>
+
+                          {/* Blacklisted Offensive Words */}
+                          <div className="pt-4 space-y-2">
+                            <label className="block text-xs font-bold text-gray-900">Blacklisted Keywords & Offensive Words</label>
+                            <p className="text-[10px] text-gray-500">Posts containing these words will be automatically flagged for administrative review.</p>
+                            
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={newOffensiveWord}
+                                onChange={e => setNewOffensiveWord(e.target.value)}
+                                placeholder="Add keyword (e.g. scam)..."
+                                className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-[#2D6A4F] w-60"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!newOffensiveWord.trim()) return;
+                                  const list = modSettings.offensive_words_list || [];
+                                  if (!list.includes(newOffensiveWord.trim().toLowerCase())) {
+                                    setModSettings((s: any) => ({ ...s, offensive_words_list: [...list, newOffensiveWord.trim().toLowerCase()] }));
+                                  }
+                                  setNewOffensiveWord("");
+                                }}
+                                className="px-3 py-1.5 bg-[#2D6A4F] text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-[#1B4D35]"
+                              >
+                                Add Keyword
+                              </button>
+                            </div>
+
+                            <div className="flex flex-wrap gap-1.5 pt-2">
+                              {(modSettings.offensive_words_list || []).map((word: string) => (
+                                <span key={word} className="inline-flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded-full text-xs font-bold">
+                                  {word}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setModSettings((s: any) => ({
+                                        ...s,
+                                        offensive_words_list: s.offensive_words_list.filter((w: string) => w !== word)
+                                      }));
+                                    }}
+                                    className="hover:text-red-900 cursor-pointer"
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-gray-100 pt-4 flex justify-end">
+                          <button
+                            type="button"
+                            disabled={savingSettings}
+                            onClick={() => handleSaveForumSettings(modSettings)}
+                            className="px-5 py-2 bg-[#2D6A4F] hover:bg-[#1B4D35] text-white rounded-xl text-xs font-bold transition disabled:opacity-60 cursor-pointer"
+                          >
+                            {savingSettings ? "Saving Settings..." : "Save Moderation Settings"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* MODAL: POST DETAILS & COMMENTS MODAL */}
+                    <AnimatePresence>
+                      {viewingAdminPost && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+                          <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }} className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col border border-gray-100">
+                            {/* Modal Header */}
+                            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-stone-50">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-[#2D6A4F]/10 text-[#2D6A4F] flex items-center justify-center font-bold text-sm overflow-hidden border border-[#2D6A4F]/20">
+                                  {viewingAdminPost.author_avatar ? (
+                                    <img src={viewingAdminPost.author_avatar} className="w-full h-full object-cover" />
+                                  ) : (
+                                    (viewingAdminPost.author_name || "U")[0].toUpperCase()
+                                  )}
+                                </div>
+                                <div>
+                                  <h3 className="font-bold text-stone-900 text-sm">{viewingAdminPost.author_name || "Unknown Farmer"}</h3>
+                                  <p className="text-[11px] text-stone-400 font-mono">
+                                    @{viewingAdminPost.author_username || viewingAdminPost.author_handle || "user"} • {new Date(viewingAdminPost.created_at).toLocaleDateString()}
+                                  </p>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center gap-3">
+                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                  viewingAdminPost.status === "published" ? "bg-green-100 text-green-800" :
+                                  viewingAdminPost.status === "flagged" ? "bg-amber-100 text-amber-800 animate-pulse" :
+                                  viewingAdminPost.status === "pending" ? "bg-blue-100 text-blue-800" :
+                                  viewingAdminPost.status === "hidden" ? "bg-gray-100 text-gray-600" :
+                                  "bg-red-100 text-red-800"
+                                }`}>
+                                  {viewingAdminPost.status || "published"}
+                                </span>
+                                <button 
+                                  onClick={() => setViewingAdminPost(null)}
+                                  className="p-1.5 hover:bg-stone-200 rounded-full text-stone-500 transition cursor-pointer"
+                                >
+                                  <X className="h-5 w-5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Modal Content Body */}
+                            <div className="p-6 overflow-y-auto space-y-5 text-left">
+                              {/* Title */}
+                              {viewingAdminPost.title && (
+                                <h2 className="text-lg font-bold text-stone-900 leading-snug">
+                                  {viewingAdminPost.title}
+                                </h2>
+                              )}
+
+                              {/* Attached Media Gallery */}
+                              {viewingAdminPost.media_urls && viewingAdminPost.media_urls.length > 0 && (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-2xl overflow-hidden bg-stone-900 p-1">
+                                  {viewingAdminPost.media_urls.map((url: string, idx: number) => {
+                                    const isVideo = url.endsWith(".mp4") || url.endsWith(".webm") || url.includes("video");
+                                    return isVideo ? (
+                                      <video key={idx} src={url} controls className="w-full h-56 object-cover rounded-xl" />
+                                    ) : (
+                                      <img key={idx} src={url} alt="media" className="w-full h-56 object-cover rounded-xl" />
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {/* Caption / Full Text */}
+                              <p className="text-stone-700 text-sm whitespace-pre-line leading-relaxed">
+                                {viewingAdminPost.caption || viewingAdminPost.body || "No text content"}
+                              </p>
+
+                              {/* Category & Tags */}
+                              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-stone-100">
+                                <span className="bg-emerald-50 text-emerald-800 text-[11px] font-bold px-2.5 py-1 rounded-lg">
+                                  🏷️ {viewingAdminPost.category || viewingAdminPost.type || "General"}
+                                </span>
+                                {Array.isArray(viewingAdminPost.tags) && viewingAdminPost.tags.map((tag: string, i: number) => (
+                                  <span key={i} className="bg-stone-100 text-stone-600 text-[11px] font-medium px-2 py-0.5 rounded-md">
+                                    {tag.startsWith("#") ? tag : `#${tag}`}
+                                  </span>
+                                ))}
+                              </div>
+
+                              {/* Metrics Banner */}
+                              <div className="bg-stone-50 border border-stone-200/80 rounded-2xl p-4 flex items-center justify-around text-xs font-semibold text-stone-700">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-base">👁️</span>
+                                  <span>{viewingAdminPost.views_count || viewingAdminPost.views || 0} Views</span>
+                                </div>
+                                <div className="h-4 w-px bg-stone-200" />
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-base">❤️</span>
+                                  <span>{viewingAdminPost.like_count || viewingAdminPost.likes_count || viewingAdminPost.likes || 0} Likes</span>
+                                </div>
+                                <div className="h-4 w-px bg-stone-200" />
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-base">💬</span>
+                                  <span>{viewingAdminPost.comment_count || viewingAdminPost.comments_count || viewingAdminPost.comments || 0} Comments</span>
+                                </div>
+                                <div className="h-4 w-px bg-stone-200" />
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-base">⚠️</span>
+                                  <span className={viewingAdminPost.reports_count > 0 ? "text-red-600 font-bold" : ""}>
+                                    {viewingAdminPost.reports_count || 0} Reports
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Comments Section */}
+                              <div className="space-y-3 pt-2">
+                                <h4 className="font-bold text-stone-900 text-sm flex items-center gap-2">
+                                  <MessageCircle className="h-4 w-4 text-[#2D6A4F]" />
+                                  Post Comments ({modComments.filter(c => c.post_id === viewingAdminPost.id).length})
+                                </h4>
+
+                                {modComments.filter(c => c.post_id === viewingAdminPost.id).length === 0 ? (
+                                  <p className="text-xs text-stone-400 italic py-2">No comments on this post yet.</p>
+                                ) : (
+                                  <div className="space-y-2.5 divide-y divide-stone-100">
+                                    {modComments
+                                      .filter(c => c.post_id === viewingAdminPost.id)
+                                      .map(comment => (
+                                        <div key={comment.id} className="pt-2.5 flex items-start justify-between gap-3">
+                                          <div className="flex items-start gap-2.5">
+                                            <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-[10px] shrink-0 overflow-hidden">
+                                              {comment.author_avatar ? (
+                                                <img src={comment.author_avatar} className="w-full h-full object-cover" />
+                                              ) : (
+                                                (comment.author_name || "U")[0].toUpperCase()
+                                              )}
+                                            </div>
+                                            <div className="text-xs">
+                                              <div className="flex items-center gap-2">
+                                                <span className="font-bold text-stone-850">{comment.author_name || "Farmer"}</span>
+                                                <span className="text-[10px] text-stone-400">@{comment.author_username || comment.author_handle || "user"}</span>
+                                                <span className="text-[10px] text-stone-300">• {new Date(comment.created_at).toLocaleDateString()}</span>
+                                              </div>
+                                              <p className="text-stone-700 mt-1 leading-relaxed">{comment.body || comment.content}</p>
+                                            </div>
+                                          </div>
+
+                                          <div className="shrink-0 flex items-center gap-1">
+                                            <button
+                                              onClick={() => handleModerateCommentAction(comment.id, comment.status === "hidden" ? "published" : "hidden")}
+                                              className={`text-[10px] font-bold px-2 py-0.5 rounded cursor-pointer ${
+                                                comment.status === "hidden" ? "bg-green-100 text-green-700" : "bg-gray-100 text-stone-600 hover:bg-gray-200"
+                                              }`}
+                                            >
+                                              {comment.status === "hidden" ? "Unhide" : "Hide"}
+                                            </button>
+                                            <button
+                                              onClick={() => handleModerateCommentAction(comment.id, "deleted")}
+                                              className="text-[10px] font-bold px-2 py-0.5 bg-red-50 text-red-600 hover:bg-red-100 rounded cursor-pointer"
+                                            >
+                                              Delete
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Modal Actions Footer */}
+                            <div className="px-6 py-4 bg-stone-50 border-t border-gray-100 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                {viewingAdminPost.status !== "published" && (
+                                  <button
+                                    onClick={() => {
+                                      handleModeratePostAction(viewingAdminPost.id, "published");
+                                      setViewingAdminPost((prev: any) => prev ? { ...prev, status: "published" } : null);
+                                    }}
+                                    className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                                  >
+                                    ✓ Approve Post
+                                  </button>
+                                )}
+                                {viewingAdminPost.status !== "hidden" && (
+                                  <button
+                                    onClick={() => {
+                                      handleModeratePostAction(viewingAdminPost.id, "hidden");
+                                      setViewingAdminPost((prev: any) => prev ? { ...prev, status: "hidden" } : null);
+                                    }}
+                                    className="px-3.5 py-1.5 bg-stone-700 hover:bg-stone-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                                  >
+                                    👁️ Hide Post
+                                  </button>
+                                )}
+                                {viewingAdminPost.status !== "flagged" && (
+                                  <button
+                                    onClick={() => {
+                                      handleModeratePostAction(viewingAdminPost.id, "flagged");
+                                      setViewingAdminPost((prev: any) => prev ? { ...prev, status: "flagged" } : null);
+                                    }}
+                                    className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                                  >
+                                    ⚠️ Flag Post
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => {
+                                    handleModeratePostAction(viewingAdminPost.id, "deleted");
+                                    setViewingAdminPost(null);
+                                  }}
+                                  className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                                >
+                                  🗑️ Delete Post
+                                </button>
+                              </div>
+
+                              <button
+                                onClick={() => setViewingAdminPost(null)}
+                                className="px-4 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-800 rounded-xl text-xs font-bold transition cursor-pointer"
+                              >
+                                Close
+                              </button>
+                            </div>
+                          </motion.div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* MODAL 1: USER RESTRICTION MODAL */}
+                    <AnimatePresence>
+                      {restrictionModalOpen && restrictionTargetUser && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+                          <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl space-y-4">
+                            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                              <h3 className="font-bold text-gray-900">Restrict User: {restrictionTargetUser.name || restrictionTargetUser.full_name}</h3>
+                              <button onClick={() => setRestrictionModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+                            </div>
+
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">Action Type</label>
+                                <select
+                                  value={restrictionType}
+                                  onChange={e => setRestrictionType(e.target.value as any)}
+                                  className="w-full border border-gray-200 rounded-lg p-2 text-xs font-bold text-gray-800 outline-none"
+                                >
+                                  <option value="warning">Official Warning</option>
+                                  <option value="restricted">Restricted (No posting/commenting)</option>
+                                  <option value="suspended">Suspended Account</option>
+                                  <option value="banned">Permanent Ban</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">Reason for Restriction *</label>
+                                <textarea
+                                  required
+                                  rows={3}
+                                  value={restrictionReason}
+                                  onChange={e => setRestrictionReason(e.target.value)}
+                                  placeholder="Specify community guidelines violation details..."
+                                  className="w-full border border-gray-200 rounded-lg p-2 text-xs text-gray-800 outline-none resize-none"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-gray-700 mb-1">Duration (Days)</label>
+                                <input
+                                  type="number"
+                                  value={restrictionDuration}
+                                  onChange={e => setRestrictionDuration(Number(e.target.value))}
+                                  className="w-full border border-gray-200 rounded-lg p-2 text-xs text-gray-800 outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex justify-end gap-2 pt-2">
+                              <button onClick={() => setRestrictionModalOpen(false)} className="px-4 py-2 border border-gray-200 rounded-xl text-xs font-bold text-gray-500">Cancel</button>
+                              <button
+                                disabled={submittingRestriction}
+                                onClick={handleApplyUserRestriction}
+                                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition disabled:opacity-60"
+                              >
+                                {submittingRestriction ? "Applying..." : "Confirm Restriction"}
+                              </button>
+                            </div>
+                          </motion.div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* MODAL 2: REPORT DETAIL MODAL */}
+                    <AnimatePresence>
+                      {reportModalOpen && selectedReport && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+                          <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-xl space-y-4">
+                            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                              <h3 className="font-bold text-gray-900">Report Details #{selectedReport.id?.slice(0, 8)}</h3>
+                              <button onClick={() => setReportModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+                            </div>
+
+                            <div className="space-y-3 text-xs">
+                              <div>
+                                <span className="font-bold text-gray-400 block uppercase text-[9px]">Reporter</span>
+                                <span className="font-bold text-gray-900">{selectedReport.reporter_name}</span>
+                              </div>
+
+                              <div>
+                                <span className="font-bold text-gray-400 block uppercase text-[9px]">Violation Reason</span>
+                                <span className="font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded inline-block">{selectedReport.reason}</span>
+                              </div>
+
+                              {selectedReport.details && (
+                                <div>
+                                  <span className="font-bold text-gray-400 block uppercase text-[9px]">Additional Details</span>
+                                  <p className="p-2.5 bg-gray-50 rounded-lg text-gray-700 italic">{selectedReport.details}</p>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
+                              <button onClick={() => setReportModalOpen(false)} className="px-4 py-2 border border-gray-200 rounded-xl text-xs font-bold text-gray-500">Close</button>
+                              <button
+                                onClick={() => {
+                                  handleModerateReportAction(selectedReport.id, "resolved", "Resolved in detailed view");
+                                  setReportModalOpen(false);
+                                }}
+                                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold"
+                              >
+                                Mark Resolved
+                              </button>
+                            </div>
+                          </motion.div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 )}
 
@@ -2046,7 +3424,7 @@ function AdminPanel() {
                                 </div>
                                 <div className="text-left min-w-0">
                                   <h3 className="text-xs font-black text-gray-800 block leading-tight truncate">{selectedInquiry.name}</h3>
-                                  <span className="text-[10px] text-gray-400 block font-mono mt-0.5 truncate">{selectedInquiry.email} • {selectedInquiry.phone}</span>
+                                  <span className="text-[10px] text-gray-500 block font-mono font-bold mt-0.5 truncate">{selectedInquiry.email} • {selectedInquiry.phone}</span>
                                 </div>
                               </div>
                               
@@ -2130,22 +3508,16 @@ function AdminPanel() {
                                 <div className="bg-emerald-50 border border-emerald-200/60 rounded-xl p-4 max-w-lg w-full flex flex-col items-center gap-3 text-center">
                                   <h4 className="text-xs font-bold text-emerald-950">🌱 Reply to {selectedInquiry.name}</h4>
                                   <p className="text-[11px] text-emerald-800 leading-relaxed">
-                                    Connect directly to the inquirer using WhatsApp or Email to answer their question.
+                                    Connect directly to the inquirer using WhatsApp to answer their question.
                                   </p>
-                                  <div className="flex gap-2 w-full justify-center">
+                                  <div className="w-full">
                                     <a
                                       href={`https://wa.me/${selectedInquiry.phone.replace(/[^0-9]/g, "")}?text=Hello%20${encodeURIComponent(selectedInquiry.name)}%2C%20this%20is%20Mqulima%20Support%20replying%20to%20your%20inquiry%20regarding%20%22${encodeURIComponent(selectedInquiry.subject)}%22...`}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="flex-1 bg-[#25D366] hover:bg-[#20BA56] text-white text-[10px] font-bold uppercase tracking-wider py-2 px-3 rounded-lg shadow-sm hover:shadow transition text-center flex items-center justify-center gap-1.5"
+                                      className="w-full bg-[#25D366] hover:bg-[#20BA56] text-white text-[10px] font-bold uppercase tracking-wider py-2.5 px-3 rounded-lg shadow-sm hover:shadow transition text-center flex items-center justify-center gap-1.5"
                                     >
                                       <MessageCircle className="h-3.5 w-3.5 shrink-0" /> Chat WhatsApp
-                                    </a>
-                                    <a
-                                      href={`mailto:${selectedInquiry.email}?subject=Reply%20to%20your%20inquiry%20regarding%2520${encodeURIComponent(selectedInquiry.subject)}&body=Hello%20${encodeURIComponent(selectedInquiry.name)}%2C%20thank%20you%20for%2520reaching%252520out%2520to%2520Mqulima...`}
-                                      className="flex-1 bg-white hover:bg-gray-50 border border-gray-250 text-gray-800 text-[10px] font-bold uppercase tracking-wider py-2 px-3 rounded-lg shadow-sm hover:shadow transition text-center flex items-center justify-center gap-1.5"
-                                    >
-                                      <Mail className="h-3.5 w-3.5 shrink-0" /> Reply Email
                                     </a>
                                   </div>
                                 </div>

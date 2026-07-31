@@ -31,3 +31,5 @@ dist-ssr
 .env
 temp_admin_credentials.txt
 ADMIN_CREDENTIALS.txt
+.vercel
+.env*

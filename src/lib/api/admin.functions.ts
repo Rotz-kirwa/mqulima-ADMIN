@@ -138,7 +138,7 @@ export const getAdminOrders = createServerFn({ method: "GET" })
     const ordersRes = await sql`
       SELECT 
         o.id,
-        p.full_name as customer,
+        COALESCE(p.full_name, 'Guest Customer') as customer,
         o.items,
         o.total,
         o.subtotal,
@@ -153,8 +153,8 @@ export const getAdminOrders = createServerFn({ method: "GET" })
           0
         ) as items_count
       FROM orders o
-      JOIN profiles p ON o.user_id = p.id
-      WHERE o.deleted_at IS NULL AND p.deleted_at IS NULL
+      LEFT JOIN profiles p ON o.user_id = p.id
+      WHERE o.deleted_at IS NULL
       ORDER BY o.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -686,6 +686,9 @@ export const createAdminUser = createServerFn({ method: "POST" })
 
     const cleanEmail = data.email.trim().toLowerCase();
 
+    // Purge any soft-deleted profiles with this email
+    await sql`DELETE FROM profiles WHERE deleted_at IS NOT NULL AND LOWER(email) = ${cleanEmail}`;
+
     // Check conflict
     const [existing] = await sql`SELECT 1 FROM profiles WHERE LOWER(email) = ${cleanEmail}`;
     if (existing) {
@@ -1059,16 +1062,18 @@ export const getAdminAcademy = createServerFn({ method: "GET" })
         c.category,
         c.level,
         c.price,
-        c.image_url,
+        c.cover_image_url,
         c.instructor_name,
         c.instructor_title,
         c.rating,
         c.student_count,
-        c.duration,
+        c.duration_minutes,
         c.has_certificate,
         c.youtube_id,
+        c.is_published,
         c.created_at
       FROM courses c
+      WHERE c.deleted_at IS NULL
       ORDER BY c.created_at DESC
     `;
   });
@@ -1136,8 +1141,8 @@ export const createAcademyCourse = createServerFn({ method: "POST" })
     const [course] = await sql`
       INSERT INTO courses (
         title, slug, description, category, level, price,
-        instructor_name, instructor_title, image_url, youtube_id,
-        duration, has_certificate, rating, student_count
+        instructor_name, instructor_title, cover_image_url, youtube_id,
+        duration_minutes, has_certificate, rating, student_count
       ) VALUES (
         ${data.title},
         ${slug},
@@ -1149,7 +1154,7 @@ export const createAcademyCourse = createServerFn({ method: "POST" })
         ${data.instructor_title || ""},
         ${data.image_url || null},
         ${data.youtube_id || null},
-        ${data.duration || null},
+        0,
         ${data.has_certificate},
         4.5,
         0
@@ -1202,9 +1207,8 @@ export const updateAcademyCourse = createServerFn({ method: "POST" })
         price            = ${fields.price},
         instructor_name  = ${fields.instructor_name},
         instructor_title = ${fields.instructor_title || ""},
-        image_url        = ${fields.image_url || null},
+        cover_image_url  = ${fields.image_url || null},
         youtube_id       = ${fields.youtube_id || null},
-        duration         = ${fields.duration || null},
         has_certificate  = ${fields.has_certificate},
         updated_at       = NOW()
       WHERE id = ${courseId}
@@ -1390,6 +1394,27 @@ export const deleteCommodityPrice = createServerFn({ method: "POST" })
     return { success: true };
   });
 
+export const triggerAdminKamisSync = createServerFn({ method: "POST" })
+  .handler(async () => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    const actor = await verifyAdminSession();
+    
+    // Dynamically import client market sync logic
+    const { executeKamisSync } = await import("../../../../src/lib/api/market-sync.server");
+    const res = await executeKamisSync();
+
+    const { writeAuditLog } = await import("../audit-functions");
+    await writeAuditLog({
+      actorId: actor.id,
+      action: "kamis.market_prices_synced",
+      entityType: "commodity_price_board",
+      entityId: actor.id,
+      diff: { updatedCount: res.updatedCount }
+    });
+
+    return res;
+  });
+
 export const deleteAdminCommodity = createServerFn({ method: "POST" })
   .inputValidator(z.object({
     commodityId: z.string().uuid()
@@ -1460,7 +1485,7 @@ export const getAdminCustomers = createServerFn({ method: "GET" })
         AND ($3 = 'All' OR p.county_region = $3)
         AND ($4 = 'All' OR p.nature_of_agriculture = $4)
         AND ($5 = 'All' OR p.status = $5)
-        AND p.role::text IN ('farmer', 'retailer')
+        AND (p.role IS NULL OR p.role::text NOT IN ('super_admin', 'admin', 'sales_agent'))
         AND ($6 = 'All' OR p.role::text = $6)
     `, [
       search.trim(),
@@ -1503,7 +1528,7 @@ export const getAdminCustomers = createServerFn({ method: "GET" })
         AND ($3 = 'All' OR p.county_region = $3)
         AND ($4 = 'All' OR p.nature_of_agriculture = $4)
         AND ($5 = 'All' OR p.status = $5)
-        AND p.role::text IN ('farmer', 'retailer')
+        AND (p.role IS NULL OR p.role::text NOT IN ('super_admin', 'admin', 'sales_agent'))
         AND ($6 = 'All' OR p.role::text = $6)
       ORDER BY ${sortColumn} ${sortDir}
       LIMIT $7 OFFSET $8
@@ -1574,38 +1599,103 @@ export const getAdminCustomerDetails = createServerFn({ method: "GET" })
     `;
     if (!customer) throw new Error("Customer not found");
 
-    // 2. Fetch order count details
-    const [orderStats] = await sql`
-      SELECT 
-        COUNT(id) as total_orders,
-        COUNT(CASE WHEN status = 'delivered' THEN 1 END) as completed_orders,
-        COUNT(CASE WHEN status NOT IN ('delivered', 'cancelled') THEN 1 END) as current_orders,
-        COALESCE(SUM(total), 0) as total_spent
-      FROM orders
-      WHERE user_id = ${data.customerId} AND deleted_at IS NULL
-    `;
+    // 2. Fetch order stats, recent orders, favorite products, and follower counts in parallel
+    const [orderStatsRes, recentOrders, favoriteProducts, fStatsRes] = await Promise.all([
+      sql`
+        SELECT 
+          COUNT(id) as total_orders,
+          COUNT(CASE WHEN status = 'delivered' THEN 1 END) as completed_orders,
+          COUNT(CASE WHEN status NOT IN ('delivered', 'cancelled') THEN 1 END) as current_orders,
+          COALESCE(SUM(total), 0) as total_spent
+        FROM orders
+        WHERE user_id = ${data.customerId} AND deleted_at IS NULL
+      `,
+      sql`
+        SELECT id, total, status, created_at
+        FROM orders
+        WHERE user_id = ${data.customerId} AND deleted_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 10
+      `,
+      sql`
+        SELECT 
+          oi.product_name as name,
+          SUM(oi.quantity) as count
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.user_id = ${data.customerId} AND o.deleted_at IS NULL
+        GROUP BY oi.product_name, oi.product_id
+        ORDER BY count DESC
+        LIMIT 5
+      `,
+      sql`
+        SELECT 
+          COUNT(CASE WHEN farmer_id = ${data.customerId} THEN 1 END)::int as followers,
+          COUNT(CASE WHEN follower_id = ${data.customerId} THEN 1 END)::int as following
+        FROM farmer_followers
+      `.catch(() => [{ followers: 0, following: 0 }])
+    ]);
 
-    // 3. Fetch recent orders
-    const recentOrders = await sql`
-      SELECT id, total, status, created_at
-      FROM orders
-      WHERE user_id = ${data.customerId} AND deleted_at IS NULL
-      ORDER BY created_at DESC
-      LIMIT 10
-    `;
+    const orderStats = orderStatsRes[0] || { total_orders: 0, completed_orders: 0, current_orders: 0, total_spent: 0 };
+    const fStats = fStatsRes[0] || { followers: 0, following: 0 };
+    const followerCount = fStats?.followers || 0;
+    const followingCount = fStats?.following || 0;
 
-    // 4. Fetch favorite products (based on ordered quantity)
-    const favoriteProducts = await sql`
-      SELECT 
-        oi.product_name as name,
-        SUM(oi.quantity) as count
-      FROM order_items oi
-      JOIN orders o ON oi.order_id = o.id
-      WHERE o.user_id = ${data.customerId} AND o.deleted_at IS NULL
-      GROUP BY oi.product_name, oi.product_id
-      ORDER BY count DESC
-      LIMIT 5
-    `;
+
+    // 6. Fetch user published forum posts
+    let recentPosts: any[] = [];
+    try {
+      const posts = await sql`
+        SELECT id, title, type, caption, status, like_count, comment_count, created_at
+        FROM show_posts
+        WHERE user_id = ${data.customerId} AND status != 'deleted'
+        ORDER BY created_at DESC
+        LIMIT 10
+      `;
+      recentPosts = posts.map((p: any) => ({
+        id: p.id,
+        title: p.title || (p.caption ? p.caption.slice(0, 35) + "..." : "Untitled Post"),
+        type: p.type,
+        likes: p.like_count || 0,
+        comments: p.comment_count || 0,
+        status: p.status,
+        date: new Date(p.created_at).toLocaleDateString(),
+      }));
+    } catch {
+      recentPosts = [];
+    }
+
+    // 7. Fetch user comments made
+    let recentComments: any[] = [];
+    try {
+      const comments = await sql`
+        SELECT c.id, c.body, c.status, c.created_at, p.title as post_title
+        FROM show_comments c
+        LEFT JOIN show_posts p ON c.post_id = p.id
+        WHERE c.user_id = ${data.customerId} AND c.status != 'deleted'
+        ORDER BY c.created_at DESC
+        LIMIT 10
+      `;
+      recentComments = comments.map((c: any) => ({
+        id: c.id,
+        body: c.body,
+        postTitle: c.post_title || "Forum Post",
+        date: new Date(c.created_at).toLocaleDateString(),
+      }));
+    } catch {
+      recentComments = [];
+    }
+
+    // 8. Fetch direct message counts
+    let dmsSentCount = 0;
+    try {
+      const [dmRes] = await sql`
+        SELECT COUNT(*)::int as cnt FROM direct_messages WHERE sender_id = ${data.customerId}
+      `;
+      dmsSentCount = dmRes?.cnt || 0;
+    } catch {
+      dmsSentCount = 0;
+    }
 
     return {
       customer: {
@@ -1630,7 +1720,16 @@ export const getAdminCustomerDetails = createServerFn({ method: "GET" })
       favoriteProducts: favoriteProducts.map(fp => ({
         name: fp.name,
         count: parseInt(fp.count || "0")
-      }))
+      })),
+      communityActivities: {
+        followersCount: followerCount,
+        followingCount: followingCount,
+        postsCount: recentPosts.length,
+        commentsCount: recentComments.length,
+        dmsSentCount: dmsSentCount,
+        recentPosts,
+        recentComments,
+      }
     };
   });
 
@@ -1758,20 +1857,59 @@ export const deleteAdminCustomer = createServerFn({ method: "POST" })
       throw new Error("Self-deletion is prohibited: You cannot delete your own admin account.");
     }
 
-    const [existing] = await sql`SELECT full_name FROM profiles WHERE id = ${data.customerId}`;
-    if (!existing) throw new Error("Customer not found");
+    const [existingProfile] = await sql`SELECT full_name, email, phone, id_number FROM profiles WHERE id = ${data.customerId}`;
+    const [existingUser] = await sql`SELECT first_name, last_name, email, phone_number, national_id FROM users WHERE id = ${data.customerId}`;
 
-    await sql.begin(async (sql) => {
-      await sql`
-        UPDATE profiles
-        SET deleted_at = NOW()
-        WHERE id = ${data.customerId}
-      `;
-      await sql`
-        UPDATE users
-        SET password_hash = 'DELETED_' || gen_random_uuid()::text
-        WHERE id = ${data.customerId}
-      `;
+    if (!existingProfile && !existingUser) {
+      throw new Error("Customer not found");
+    }
+
+    const fullName = existingProfile?.full_name || `${existingUser?.first_name || ""} ${existingUser?.last_name || ""}`.trim() || "Customer";
+    const emails = Array.from(new Set([existingProfile?.email, existingUser?.email].filter(Boolean))).map(e => e!.toLowerCase());
+    const phones = Array.from(new Set([existingProfile?.phone, existingUser?.phone_number].filter(Boolean)));
+    const nationalIds = Array.from(new Set([existingProfile?.id_number, existingUser?.national_id].filter(Boolean)));
+
+    await sql.begin(async (tx) => {
+      // 1. Delete user moderation & restriction records
+      await tx`DELETE FROM user_restrictions WHERE user_id = ${data.customerId} OR created_by = ${data.customerId}`;
+      await tx`DELETE FROM user_audit_actions WHERE target_user_id = ${data.customerId} OR admin_id = ${data.customerId}`;
+      await tx`DELETE FROM moderation_reports WHERE reporter_id = ${data.customerId}`;
+
+      // 2. Delete community forum posts, comments, likes, and bookmarks
+      await tx`DELETE FROM show_comments WHERE user_id = ${data.customerId}`;
+      await tx`DELETE FROM show_likes WHERE user_id = ${data.customerId}`;
+      await tx`DELETE FROM show_bookmarks WHERE user_id = ${data.customerId}`;
+      await tx`DELETE FROM show_posts WHERE author_id = ${data.customerId}`;
+
+      // 3. Delete followers & messaging
+      await tx`DELETE FROM farmer_followers WHERE follower_id = ${data.customerId} OR farmer_id = ${data.customerId}`;
+      await tx`DELETE FROM direct_messages WHERE sender_id = ${data.customerId} OR receiver_id = ${data.customerId}`;
+      await tx`DELETE FROM conversations WHERE participant1_id = ${data.customerId} OR participant2_id = ${data.customerId}`;
+
+      // 4. Delete AI & Doctor chats
+      await tx`DELETE FROM ai_messages WHERE conversation_id IN (SELECT id FROM ai_conversations WHERE user_id = ${data.customerId})`;
+      await tx`DELETE FROM ai_conversations WHERE user_id = ${data.customerId}`;
+      await tx`DELETE FROM crop_diagnoses WHERE user_id = ${data.customerId}`;
+
+      // 5. Delete Academy & Shop orders/quotations/progress
+      await tx`DELETE FROM user_completed_lessons WHERE user_id = ${data.customerId}`;
+      await tx`DELETE FROM quotations WHERE user_id = ${data.customerId}`;
+      await tx`DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id = ${data.customerId})`;
+      await tx`DELETE FROM orders WHERE user_id = ${data.customerId}`;
+
+      // 6. Hard delete from profiles by ID or matching Email/Phone/ID
+      if (emails.length > 0) {
+        await tx`DELETE FROM profiles WHERE id = ${data.customerId} OR LOWER(email) = ANY(${emails})`;
+      } else {
+        await tx`DELETE FROM profiles WHERE id = ${data.customerId}`;
+      }
+
+      // 7. Hard delete from users by ID or matching Email/Phone/ID
+      if (emails.length > 0) {
+        await tx`DELETE FROM users WHERE id = ${data.customerId} OR LOWER(email) = ANY(${emails})`;
+      } else {
+        await tx`DELETE FROM users WHERE id = ${data.customerId}`;
+      }
     });
 
     const { writeAuditLog } = await import("../audit-functions");
@@ -1780,7 +1918,7 @@ export const deleteAdminCustomer = createServerFn({ method: "POST" })
       action: "customer.deleted",
       entityType: "profile",
       entityId: data.customerId,
-      diff: { customer: existing.full_name }
+      diff: { customer: fullName }
     });
 
     return { success: true };
@@ -1878,6 +2016,492 @@ export const deleteAdminInquiry = createServerFn({ method: "POST" })
       entityType: "contact_submission",
       entityId: data.id,
       diff: { name: existing.name }
+    });
+
+    return { success: true };
+  });
+
+// --- FORUM MODERATION MODULE SERVER FUNCTIONS ---
+
+// 1. Get detailed forum posts
+export const getAdminForumPosts = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    return sql`
+      SELECT sp.id, sp.title, sp.caption, sp.caption as body, sp.type, sp.type as category, 
+             sp.like_count, sp.like_count as likes, sp.like_count as likes_count, 
+             sp.comment_count, sp.comment_count as comments, sp.comment_count as comments_count, 
+             sp.views_count, sp.views_count as views, sp.reports_count, sp.tags, sp.media_urls, 
+             COALESCE(sp.status, 'published') as status, sp.created_at,
+             p.full_name as author_name, p.username as author_handle, p.username as author_username, p.avatar_url as author_avatar
+      FROM show_posts sp
+      LEFT JOIN profiles p ON sp.user_id = p.id
+      ORDER BY sp.created_at DESC
+    `;
+  });
+
+// 2. Get detailed forum comments
+export const getAdminForumComments = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    return sql`
+      SELECT sc.id, sc.post_id, sc.body, COALESCE(sc.status, 'published') as status, sc.reports_count, sc.created_at,
+             p.full_name as author_name, p.username as author_handle, p.username as author_username, p.avatar_url as author_avatar,
+             sp.title as post_title
+      FROM show_comments sc
+      LEFT JOIN profiles p ON sc.user_id = p.id
+      LEFT JOIN show_posts sp ON sc.post_id = sp.id
+      ORDER BY sc.created_at DESC
+    `;
+  });
+
+// 3. Get detailed forum reports
+export const getAdminForumReports = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    const reports = await sql`
+      SELECT fr.id, fr.reporter_id, fr.content_type, fr.content_id, fr.reason, fr.status, fr.details, fr.created_at,
+             p.full_name as reporter_name, p.username as reporter_handle
+      FROM forum_reports fr
+      LEFT JOIN profiles p ON fr.reporter_id = p.id
+      ORDER BY fr.created_at DESC
+    `;
+
+    const enriched = [];
+    for (const report of reports) {
+      let preview = "Deleted or unavailable content";
+      let authorName = "Unknown";
+      let authorHandle = "unknown";
+      
+      try {
+        if (report.content_type === "post") {
+          const [post] = await sql`
+            SELECT sp.title, sp.caption, p.full_name, p.username
+            FROM show_posts sp
+            LEFT JOIN profiles p ON sp.user_id = p.id
+            WHERE sp.id = ${report.content_id}
+          `;
+          if (post) {
+            preview = post.title || post.caption || "No Text";
+            authorName = post.full_name || "Unknown";
+            authorHandle = post.username || "unknown";
+          }
+        } else if (report.content_type === "comment") {
+          const [comment] = await sql`
+            SELECT sc.body, p.full_name, p.username
+            FROM show_comments sc
+            LEFT JOIN profiles p ON sc.user_id = p.id
+            WHERE sc.id = ${report.content_id}
+          `;
+          if (comment) {
+            preview = comment.body || "No Body";
+            authorName = comment.full_name || "Unknown";
+            authorHandle = comment.username || "unknown";
+          }
+        } else if (report.content_type === "profile") {
+          const [profile] = await sql`
+            SELECT full_name, username
+            FROM profiles
+            WHERE id = ${report.content_id}
+          `;
+          if (profile) {
+            preview = `User Profile: ${profile.full_name} (${profile.username})`;
+            authorName = profile.full_name;
+            authorHandle = profile.username;
+          }
+        }
+      } catch (err) {
+        console.error("Enrichment error:", err);
+      }
+
+      enriched.push({
+        ...report,
+        preview,
+        author_name: authorName,
+        author_handle: authorHandle
+      });
+    }
+
+    return enriched;
+  });
+
+// 4. Get forum users and their activity stats
+export const getAdminForumUsers = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    return sql`
+      SELECT p.id, p.full_name, p.username, p.email, p.avatar_url, p.role, p.restriction_status, p.reputation_score, p.created_at,
+             (SELECT COUNT(*) FROM show_posts WHERE user_id = p.id) as post_count,
+             (SELECT COUNT(*) FROM show_comments WHERE user_id = p.id) as comment_count,
+             (SELECT COUNT(*) FROM forum_reports WHERE reporter_id = p.id) as reports_made,
+             (SELECT COUNT(*) FROM forum_reports WHERE content_type = 'profile' AND content_id = p.id) as reports_received
+      FROM profiles p
+      WHERE p.deleted_at IS NULL
+      ORDER BY p.created_at DESC
+    `;
+  });
+
+// 5. Get forum settings
+export const getAdminForumSettings = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    const [settings] = await sql`SELECT * FROM moderation_settings LIMIT 1`;
+    return settings || null;
+  });
+
+// 6. Update forum settings
+export const updateAdminForumSettings = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    spamDetectionEnabled: z.boolean(),
+    repeatedPostsWindowMins: z.number().int().min(1),
+    blockExternalLinks: z.boolean(),
+    offensiveWordsList: z.array(z.string()),
+    autoFlagReportThreshold: z.number().int().min(1)
+  }))
+  .handler(async ({ data }) => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    const actor = await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    await sql`
+      UPDATE moderation_settings
+      SET spam_detection_enabled = ${data.spamDetectionEnabled},
+          repeated_posts_window_mins = ${data.repeatedPostsWindowMins},
+          block_external_links = ${data.blockExternalLinks},
+          offensive_words_list = ${data.offensiveWordsList},
+          auto_flag_report_threshold = ${data.autoFlagReportThreshold},
+          updated_at = NOW()
+    `;
+
+    const { writeAuditLog } = await import("../audit-functions");
+    await writeAuditLog({
+      actorId: actor.id,
+      action: "forum.settings_updated",
+      entityType: "moderation_settings",
+      entityId: actor.id,
+      diff: data
+    });
+
+    return { success: true };
+  });
+
+// 7. Get moderation actions logs
+export const getAdminForumLogs = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    return sql`
+      SELECT ma.id, ma.action, ma.content_type, ma.content_id, ma.previous_status, ma.new_status, ma.details, ma.created_at,
+             p.full_name as admin_name, p.username as admin_handle
+      FROM moderation_actions ma
+      LEFT JOIN profiles p ON ma.admin_id = p.id
+      ORDER BY ma.created_at DESC
+    `;
+  });
+
+// 8. Moderate individual post
+export const moderateForumPost = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    postId: z.string().uuid(),
+    status: z.enum(['published', 'pending', 'hidden', 'flagged', 'deleted', 'archived']),
+    reason: z.string().optional()
+  }))
+  .handler(async ({ data }) => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    const actor = await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    const [post] = await sql`SELECT status FROM show_posts WHERE id = ${data.postId}`;
+    if (!post) throw new Error("Post not found");
+
+    if (data.status === 'deleted') {
+      await sql`DELETE FROM show_posts WHERE id = ${data.postId}`;
+    } else {
+      await sql`UPDATE show_posts SET status = ${data.status} WHERE id = ${data.postId}`;
+    }
+
+    await sql`
+      INSERT INTO moderation_actions (admin_id, action, content_type, content_id, previous_status, new_status, details)
+      VALUES (${actor.id}, ${`moderate_post_${data.status}`}, 'post', ${data.postId}, ${post.status}, ${data.status}, ${data.reason || null})
+    `;
+
+    const { writeAuditLog } = await import("../audit-functions");
+    await writeAuditLog({
+      actorId: actor.id,
+      action: `forum.post_${data.status}`,
+      entityType: "show_post",
+      entityId: data.postId,
+      diff: { status: data.status, reason: data.reason }
+    });
+
+    return { success: true };
+  });
+
+// 9. Moderate individual comment
+export const moderateForumComment = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    commentId: z.string().uuid(),
+    status: z.enum(['published', 'pending', 'hidden', 'flagged', 'deleted']),
+    reason: z.string().optional()
+  }))
+  .handler(async ({ data }) => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    const actor = await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    const [comment] = await sql`SELECT status FROM show_comments WHERE id = ${data.commentId}`;
+    if (!comment) throw new Error("Comment not found");
+
+    if (data.status === 'deleted') {
+      await sql`DELETE FROM show_comments WHERE id = ${data.commentId}`;
+    } else {
+      await sql`UPDATE show_comments SET status = ${data.status} WHERE id = ${data.commentId}`;
+    }
+
+    await sql`
+      INSERT INTO moderation_actions (admin_id, action, content_type, content_id, previous_status, new_status, details)
+      VALUES (${actor.id}, ${`moderate_comment_${data.status}`}, 'comment', ${data.commentId}, ${comment.status}, ${data.status}, ${data.reason || null})
+    `;
+
+    const { writeAuditLog } = await import("../audit-functions");
+    await writeAuditLog({
+      actorId: actor.id,
+      action: `forum.comment_${data.status}`,
+      entityType: "show_comment",
+      entityId: data.commentId,
+      diff: { status: data.status, reason: data.reason }
+    });
+
+    return { success: true };
+  });
+
+// 10. Moderate report status
+export const moderateForumReport = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    reportId: z.string().uuid(),
+    status: z.enum(['pending', 'dismissed', 'resolved']),
+    actionTaken: z.string().optional()
+  }))
+  .handler(async ({ data }) => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    const actor = await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    const [report] = await sql`SELECT status, content_type, content_id FROM forum_reports WHERE id = ${data.reportId}`;
+    if (!report) throw new Error("Report not found");
+
+    await sql`
+      UPDATE forum_reports
+      SET status = ${data.status}
+      WHERE id = ${data.reportId}
+    `;
+
+    await sql`
+      INSERT INTO moderation_actions (admin_id, action, content_type, content_id, previous_status, new_status, details)
+      VALUES (${actor.id}, ${`resolve_report_${data.status}`}, 'report', ${data.reportId}, ${report.status}, ${data.status}, ${data.actionTaken || null})
+    `;
+
+    const { writeAuditLog } = await import("../audit-functions");
+    await writeAuditLog({
+      actorId: actor.id,
+      action: `forum.report_${data.status}`,
+      entityType: "forum_report",
+      entityId: data.reportId,
+      diff: { status: data.status, actionTaken: data.actionTaken }
+    });
+
+    return { success: true };
+  });
+
+// 11. Restrict/Warn/Ban user
+export const moderateForumUser = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    userId: z.string().uuid(),
+    restrictionType: z.enum(['warning', 'restricted', 'suspended', 'banned']),
+    reason: z.string(),
+    durationDays: z.number().optional()
+  }))
+  .handler(async ({ data }) => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    const actor = await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    const [profile] = await sql`SELECT restriction_status, full_name FROM profiles WHERE id = ${data.userId}`;
+    if (!profile) throw new Error("User profile not found");
+
+    const expiresAt = data.durationDays ? new Date(Date.now() + data.durationDays * 24 * 60 * 60 * 1000) : null;
+
+    await sql`
+      INSERT INTO user_restrictions (user_id, restriction_type, expires_at, reason, created_by)
+      VALUES (${data.userId}, ${data.restrictionType}, ${expiresAt}, ${data.reason}, ${actor.id})
+    `;
+
+    await sql`
+      UPDATE profiles
+      SET restriction_status = ${data.restrictionType}
+      WHERE id = ${data.userId}
+    `;
+
+    await sql`
+      INSERT INTO moderation_actions (admin_id, action, content_type, content_id, previous_status, new_status, details)
+      VALUES (${actor.id}, ${`restrict_user_${data.restrictionType}`}, 'profile', ${data.userId}, ${profile.restriction_status}, ${data.restrictionType}, ${data.reason})
+    `;
+
+    const { writeAuditLog } = await import("../audit-functions");
+    await writeAuditLog({
+      actorId: actor.id,
+      action: `forum.user_${data.restrictionType}`,
+      entityType: "profile",
+      entityId: data.userId,
+      diff: { restrictionType: data.restrictionType, reason: data.reason, expiresAt }
+    });
+
+    return { success: true };
+  });
+
+// 12. Remove restriction from user
+export const removeForumUserRestriction = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    userId: z.string().uuid(),
+    reason: z.string()
+  }))
+  .handler(async ({ data }) => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    const actor = await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    const [profile] = await sql`SELECT restriction_status FROM profiles WHERE id = ${data.userId}`;
+    if (!profile) throw new Error("User profile not found");
+
+    await sql`
+      UPDATE profiles
+      SET restriction_status = 'active'
+      WHERE id = ${data.userId}
+    `;
+
+    await sql`
+      INSERT INTO moderation_actions (admin_id, action, content_type, content_id, previous_status, new_status, details)
+      VALUES (${actor.id}, 'remove_restriction', 'profile', ${data.userId}, ${profile.restriction_status}, 'active', ${data.reason})
+    `;
+
+    const { writeAuditLog } = await import("../audit-functions");
+    await writeAuditLog({
+      actorId: actor.id,
+      action: "forum.user_unrestricted",
+      entityType: "profile",
+      entityId: data.userId,
+      diff: { previousStatus: profile.restriction_status, reason: data.reason }
+    });
+
+    return { success: true };
+  });
+
+// 13. Bulk moderate posts
+export const bulkModerateForumPosts = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    postIds: z.array(z.string().uuid()),
+    status: z.enum(['published', 'pending', 'hidden', 'flagged', 'deleted', 'archived']),
+    reason: z.string().optional()
+  }))
+  .handler(async ({ data }) => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    const actor = await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    for (const id of data.postIds) {
+      const [post] = await sql`SELECT status FROM show_posts WHERE id = ${id}`;
+      if (post) {
+        if (data.status === 'deleted') {
+          await sql`DELETE FROM show_posts WHERE id = ${id}`;
+        } else {
+          await sql`UPDATE show_posts SET status = ${data.status} WHERE id = ${id}`;
+        }
+
+        await sql`
+          INSERT INTO moderation_actions (admin_id, action, content_type, content_id, previous_status, new_status, details)
+          VALUES (${actor.id}, ${`bulk_moderate_post_${data.status}`}, 'post', ${id}, ${post.status}, ${data.status}, ${data.reason || 'Bulk action'})
+        `;
+      }
+    }
+
+    const { writeAuditLog } = await import("../audit-functions");
+    await writeAuditLog({
+      actorId: actor.id,
+      action: "forum.posts_bulk_moderated",
+      entityType: "show_post",
+      entityId: actor.id,
+      diff: { count: data.postIds.length, status: data.status }
+    });
+
+    return { success: true };
+  });
+
+// 14. Bulk moderate comments
+export const bulkModerateForumComments = createServerFn({ method: "POST" })
+  .inputValidator(z.object({
+    commentIds: z.array(z.string().uuid()),
+    status: z.enum(['published', 'pending', 'hidden', 'flagged', 'deleted']),
+    reason: z.string().optional()
+  }))
+  .handler(async ({ data }) => {
+    const { verifyAdminSession } = await import("../auth-admin-helper-functions");
+    const actor = await verifyAdminSession();
+    const { getDb } = await import("../db-functions");
+    const sql = getDb();
+
+    for (const id of data.commentIds) {
+      const [comment] = await sql`SELECT status FROM show_comments WHERE id = ${id}`;
+      if (comment) {
+        if (data.status === 'deleted') {
+          await sql`DELETE FROM show_comments WHERE id = ${id}`;
+        } else {
+          await sql`UPDATE show_comments SET status = ${data.status} WHERE id = ${id}`;
+        }
+
+        await sql`
+          INSERT INTO moderation_actions (admin_id, action, content_type, content_id, previous_status, new_status, details)
+          VALUES (${actor.id}, ${`bulk_moderate_comment_${data.status}`}, 'comment', ${id}, ${comment.status}, ${data.status}, ${data.reason || 'Bulk action'})
+        `;
+      }
+    }
+
+    const { writeAuditLog } = await import("../audit-functions");
+    await writeAuditLog({
+      actorId: actor.id,
+      action: "forum.comments_bulk_moderated",
+      entityType: "show_comment",
+      entityId: actor.id,
+      diff: { count: data.commentIds.length, status: data.status }
     });
 
     return { success: true };

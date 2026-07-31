@@ -19,6 +19,7 @@ type Course = {
   has_certificate: boolean; youtube_id?: string;
   chapter_count: number; lesson_count: number;
   created_at: string;
+  content?: string;
 };
 type Chapter = {
   id: string; course_id: string; title: string; description?: string;
@@ -534,43 +535,10 @@ function CourseEditor({ course, onUpdated, onDeleted, refreshList }: {
     instructor_name: course.instructor_name ?? "",
     instructor_title: course.instructor_title ?? "",
     has_certificate: course.has_certificate ?? false,
+    content: course.content ?? "",
   });
   const [saveState, setSaveState] = useState<"idle"|"saving"|"saved">("idle");
-  const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [addingChapter, setAddingChapter] = useState(false);
-  const [newChapterTitle, setNewChapterTitle] = useState("");
-  const [importModalOpen, setImportModalOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>|null>(null);
-
-  const importChaptersBulk = async (titles: string[]) => {
-    try {
-      const addedChapters: Chapter[] = [];
-      for (let i = 0; i < titles.length; i++) {
-        const ch = await upsertChapter({ data: {
-          course_id: course.id,
-          title: titles[i],
-          sort_order: chapters.length + i,
-          duration_minutes: 10,
-          is_published: true,
-        }});
-        addedChapters.push(ch as Chapter);
-      }
-      setChapters(cs => [...cs, ...addedChapters]);
-      refreshList();
-      toast.success(`Imported ${titles.length} chapters! 🎉`);
-    } catch {
-      toast.error("Failed to import some chapters");
-    }
-  };
-
-  const loadChapters = useCallback(async () => {
-    try {
-      const data = await getChapters({ data: { courseId: course.id } });
-      setChapters(data as unknown as Chapter[]);
-    } catch { toast.error("Failed to load chapters"); }
-  }, [course.id]);
-
-  useEffect(() => { loadChapters(); }, [loadChapters]);
 
   // Debounced auto-save
   const autoSave = useCallback((patch: typeof form) => {
@@ -596,19 +564,6 @@ function CourseEditor({ course, onUpdated, onDeleted, refreshList }: {
     const next = !form.is_published;
     set("is_published", next);
     toast.success(next ? "Course published 🎉" : "Course set to draft");
-  };
-
-  const addChapter = async () => {
-    if (!newChapterTitle.trim()) return;
-    try {
-      const ch = await upsertChapter({ data: {
-        course_id: course.id, title: newChapterTitle.trim(),
-        sort_order: chapters.length, duration_minutes: 0, is_published: false,
-      }});
-      setChapters(cs => [...cs, ch as Chapter]);
-      setNewChapterTitle(""); setAddingChapter(false);
-      refreshList();
-    } catch { toast.error("Failed to add chapter"); }
   };
 
   const ytId = form.intro_video_type === "youtube" ? extractYouTubeId(form.intro_video_url) : null;
@@ -813,61 +768,45 @@ function CourseEditor({ course, onUpdated, onDeleted, refreshList }: {
         </div>
       </div>
 
-      {/* ── Section 3: Curriculum */}
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-xs overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4.5 border-b border-gray-150">
-          <div>
-            <span className="font-bold text-gray-900 text-base" style={{ fontFamily:"Playfair Display,serif" }}>Course Curriculum</span>
-            <p className="text-[11px] text-gray-500 mt-1 font-semibold">{chapters.length} chapters · {chapters.reduce((a,c) => a+(c.lesson_count??0),0)} lessons</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setImportModalOpen(true)}
-              className="border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg text-xs font-bold px-3 py-2 transition duration-150 cursor-pointer flex items-center gap-1.5 shadow-xs bg-white">
-              📂 Paste / Upload Syllabus
-            </button>
-            <button onClick={() => setAddingChapter(true)}
-              className="bg-[#2D6A4F] text-white hover:bg-[#224f3b] rounded-lg text-xs font-bold px-3 py-2 transition duration-150 cursor-pointer shadow-xs">
-              + Add Chapter
-            </button>
+      {/* ── Section 3: Course Content */}
+      <div className={card}>
+        <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-1">
+          <span className="text-xs font-bold uppercase tracking-wider text-[#2D6A4F]">Course Content (Markdown)</span>
+        </div>
+        <div>
+          <label className={lbl}>Write, Type or Paste Course Content</label>
+          <textarea
+            rows={15}
+            className={`${inp} resize-none font-mono text-xs`}
+            value={form.content}
+            onChange={e => set("content", e.target.value)}
+            placeholder="Type or paste the full course content here in Markdown format..."
+          />
+          <div className="mt-2 flex justify-between items-center">
+            <span className="text-[10px] text-gray-400 font-medium">Supports markdown headings, bold, italic, lists, and links.</span>
+            <label className="bg-gray-150 border border-gray-300 hover:bg-gray-200 text-gray-700 px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition flex items-center gap-1.5 shadow-xs shrink-0 bg-white">
+              <span>📤 Append Resource/PDF Link</span>
+              <input type="file" accept=".pdf,.txt,.docx,.doc,image/*" className="hidden"
+                onChange={async e => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onloadend = async () => {
+                    const base64 = (reader.result as string).split(',')[1];
+                    try {
+                      toast.loading(`Uploading ${file.name}...`, { id: "content-upload-edit" });
+                      const res = await uploadAcademyFile({ data: { fileName: file.name, fileContentBase64: base64 } });
+                      set("content", form.content + `\n\n[Download Resource: ${file.name}](${res.url})\n`);
+                      toast.success("Resource uploaded and appended!", { id: "content-upload-edit" });
+                    } catch (err) {
+                      toast.error("Failed to upload resource", { id: "content-upload-edit" });
+                    }
+                  };
+                  reader.readAsDataURL(file);
+                }} />
+            </label>
           </div>
         </div>
-
-        <div className="divide-y divide-gray-150">
-          {chapters.map((ch, i) => (
-            <ChapterRow
-              key={ch.id} chapter={ch} courseId={course.id} idx={i}
-              onUpdated={updated => setChapters(cs => cs.map(c => c.id===updated.id ? updated : c))}
-              onDeleted={id => { setChapters(cs => cs.filter(c => c.id!==id)); refreshList(); }}
-              refreshCourse={loadChapters}
-            />
-          ))}
-          {chapters.length === 0 && !addingChapter && (
-            <div className="p-8 text-center bg-gray-50/50">
-              <div className="max-w-xs mx-auto space-y-3 flex flex-col items-center">
-                <span className="text-3xl select-none">📚</span>
-                <p className="text-xs text-gray-500 font-semibold leading-relaxed">No curriculum chapters created yet. Build your syllabus to publish lessons.</p>
-                <button onClick={() => setAddingChapter(true)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#2D6A4F] text-white text-xs font-bold hover:bg-[#224f3b] cursor-pointer transition shadow-xs">
-                  <span>+</span> Add First Chapter
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* New chapter input */}
-        {addingChapter && (
-          <div className="px-4 py-3.5 border-t border-gray-150 bg-gray-50 flex items-center gap-2">
-            <input autoFocus className={`${inp} flex-1`}
-              value={newChapterTitle}
-              onChange={e => setNewChapterTitle(e.target.value)}
-              onKeyDown={e => { if (e.key==="Enter") addChapter(); if (e.key==="Escape") { setAddingChapter(false); setNewChapterTitle(""); } }}
-              placeholder="Chapter title (Enter to save, Esc to cancel)" />
-            <button onClick={addChapter} className="px-3.5 py-2.5 rounded-lg bg-[#2D6A4F] text-white text-xs font-bold cursor-pointer hover:bg-[#224f3b] transition">Add</button>
-            <button onClick={() => { setAddingChapter(false); setNewChapterTitle(""); }}
-              className="px-3.5 py-2.5 rounded-lg bg-gray-250 text-gray-700 text-xs font-bold cursor-pointer hover:bg-gray-300 transition">Cancel</button>
-          </div>
-        )}
       </div>
 
       {/* Delete course */}
@@ -882,29 +821,9 @@ function CourseEditor({ course, onUpdated, onDeleted, refreshList }: {
           Delete this course permanently
         </button>
       </div>
-
-      {importModalOpen && (
-        <SyllabusImportModal
-          onImport={importChaptersBulk}
-          onClose={() => setImportModalOpen(false)}
-        />
-      )}
     </div>
   );
 }
-
-// ══════════════════════════════════════════════════════════════════════════════
-// NEW COURSE FORM
-// ══════════════════════════════════════════════════════════════════════════════
-// ── Types ──────────────────────────────────────────────────────────────────
-type FormChapter = {
-  title: string;
-  contentType: "paste" | "upload";
-  pastedText: string;
-  fileName: string;
-  fileSize?: string;
-  fileUrl?: string;
-};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // NEW COURSE FORM
@@ -922,32 +841,14 @@ function NewCourseForm({ onCreated, onCancel }: { onCreated: (c: Course) => void
   const [instructorName, setInstructorName] = useState("");
   const [instructorTitle, setInstructorTitle] = useState("");
   const [hasCertificate, setHasCertificate] = useState(false);
-  const [chaptersList, setChaptersList] = useState<FormChapter[]>([
-    { title: "", contentType: "paste", pastedText: "", fileName: "" }
-  ]);
-  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
-
-  const handleBulkImport = (titles: string[]) => {
-    const newChaps = titles.map(t => ({
-      title: t,
-      contentType: "paste" as const,
-      pastedText: "",
-      fileName: "",
-    }));
-    setChaptersList(prev => {
-      if (prev.length === 1 && !prev[0].title) {
-        return newChaps;
-      }
-      return [...prev, ...newChaps];
-    });
-  };
 
   const create = async () => {
     if (!title.trim()) { toast.error("Title required"); return; }
     setSaving(true);
     try {
-      // 1. Create course
+      // Create course
       const c = await createAcademyCourseV2({ data: {
         title,
         description,
@@ -962,50 +863,11 @@ function NewCourseForm({ onCreated, onCancel }: { onCreated: (c: Course) => void
         instructor_name: instructorName,
         instructor_title: instructorTitle,
         has_certificate: hasCertificate,
+        content,
       }});
 
-      // 2. Insert chapters & create lessons
-      for (let i = 0; i < chaptersList.length; i++) {
-        const item = chaptersList[i];
-        const chTitle = item.title.trim() || `Chapter ${i + 1}`;
-        
-        // Save chapter
-        const ch = await upsertChapter({ data: {
-          course_id: c.id,
-          title: chTitle,
-          description: item.contentType === "paste" ? item.pastedText : "",
-          sort_order: i,
-          duration_minutes: 10,
-          is_published: true,
-        }});
-
-        // If pasted text notes, create a text lesson
-        if (item.contentType === "paste" && item.pastedText.trim()) {
-          await upsertLesson({ data: {
-            chapter_id: ch.id,
-            title: "Syllabus Notes & Details",
-            content_type: "text",
-            text_content: item.pastedText,
-            sort_order: 0,
-            is_free_preview: true,
-          }});
-        }
-
-        // If uploaded file, create a pdf lesson
-        if (item.contentType === "upload" && item.fileName) {
-          await upsertLesson({ data: {
-            chapter_id: ch.id,
-            title: item.fileName,
-            content_type: "pdf",
-            pdf_url: item.fileUrl || `https://cdn.mqulima.co.ke/docs/${item.fileName}`,
-            sort_order: 0,
-            is_free_preview: true,
-          }});
-        }
-      }
-
       onCreated(c as Course);
-      toast.success("Course created successfully with chapters! 🎉");
+      toast.success("Course created successfully! 🎉");
     } catch {
       toast.error("Failed to create course");
     } finally {
@@ -1016,7 +878,7 @@ function NewCourseForm({ onCreated, onCancel }: { onCreated: (c: Course) => void
   return (
     <div className="flex-1 flex items-center justify-center p-8 bg-gray-50/50">
       <div className="bg-white border border-gray-200 p-8 rounded-2xl shadow-lg w-full max-w-2xl space-y-6">
-        <h3 className="text-xl font-bold text-gray-900 border-b border-gray-100 pb-3" style={{ fontFamily:"Playfair Display,serif" }}>New Course</h3>
+        <h3 className="text-xl font-bold text-gray-900 border-b border-gray-150 pb-3" style={{ fontFamily:"Playfair Display,serif" }}>New Course</h3>
         
         <div className="grid grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto pr-2 scrollbar-thin">
           {/* Title */}
@@ -1139,138 +1001,39 @@ function NewCourseForm({ onCreated, onCancel }: { onCreated: (c: Course) => void
             </label>
           </div>
 
-          {/* Course Chapters & Syllabus Section */}
-          <div className="col-span-2 border-t border-gray-100 pt-5 space-y-4">
-            <div className="flex justify-between items-center">
-              <label className="text-xs font-bold uppercase tracking-wider text-[#2D6A4F] block">Course Chapters & Syllabus</label>
-              <button type="button" onClick={() => setImportModalOpen(true)}
-                className="text-[11px] text-[#2D6A4F] hover:text-[#224f3b] font-bold underline cursor-pointer">
-                📂 Import Syllabus Outline (.txt)
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {chaptersList.map((ch, idx) => (
-                <div key={idx} className="border border-gray-200 rounded-xl p-5 bg-gray-50/30 relative space-y-4 shadow-2xs hover:border-gray-300 transition">
-                  {/* Chapter Card Header */}
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-mono font-black text-white bg-[#2D6A4F] px-2.5 py-0.5 rounded-md uppercase tracking-wider">
-                      Chapter {String(idx + 1).padStart(2, "0")}
-                    </span>
-                    {chaptersList.length > 1 && (
-                      <button type="button" onClick={() => setChaptersList(prev => prev.filter((_, i) => i !== idx))}
-                        className="text-gray-400 hover:text-red-600 transition text-xs font-bold cursor-pointer">
-                        ✕ Remove
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* Chapter Title */}
-                    <div className="col-span-2">
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Chapter Title</label>
-                      <input className={inp} value={ch.title}
-                        onChange={e => {
-                          const val = e.target.value;
-                          setChaptersList(prev => prev.map((item, i) => i === idx ? { ...item, title: val } : item));
-                        }}
-                        placeholder={`e.g. Chapter ${idx + 1}: Introduction & Key Concepts`} />
-                    </div>
-
-                    {/* Content Selector */}
-                    <div className="col-span-2">
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">Chapter Content Option</label>
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => setChaptersList(prev => prev.map((item, i) => i === idx ? { ...item, contentType: "paste" } : item))}
-                          className={`flex-1 py-2 px-3 border rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                            ch.contentType === "paste"
-                              ? "bg-[#2D6A4F] text-white border-[#2D6A4F] shadow-xs"
-                              : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
-                          }`}>
-                          <span>📄</span> Paste Text Notes
-                        </button>
-                        <button type="button" onClick={() => setChaptersList(prev => prev.map((item, i) => i === idx ? { ...item, contentType: "upload" } : item))}
-                          className={`flex-1 py-2 px-3 border rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                            ch.contentType === "upload"
-                              ? "bg-[#2D6A4F] text-white border-[#2D6A4F] shadow-xs"
-                              : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
-                          }`}>
-                          <span>📤</span> Upload Resource
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Paste Text Area */}
-                    {ch.contentType === "paste" && (
-                      <div className="col-span-2">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Paste Chapter Notes (Markdown)</label>
-                        <textarea rows={4} className={`${inp} resize-none font-mono text-xs`} value={ch.pastedText}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setChaptersList(prev => prev.map((item, i) => i === idx ? { ...item, pastedText: val } : item));
-                          }}
-                          placeholder="Paste or write detailed guides, guidelines, or text notes for this chapter..." />
-                      </div>
-                    )}
-
-                    {/* Upload File Input */}
-                    {ch.contentType === "upload" && (
-                      <div className="col-span-2">
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">Upload File (.pdf, .txt, .docx)</label>
-                        {ch.fileName ? (
-                          <div className="flex items-center justify-between border border-[#2D6A4F]/20 bg-[#2D6A4F]/5 rounded-lg p-3 text-xs font-semibold text-gray-800">
-                            <span className="truncate flex items-center gap-2 text-[#2D6A4F]">
-                              <span>📄</span> {ch.fileName} {ch.fileSize ? `(${ch.fileSize})` : ""}
-                            </span>
-                            <button type="button" onClick={() => setChaptersList(prev => prev.map((item, i) => i === idx ? { ...item, fileName: "", fileSize: undefined } : item))}
-                              className="text-red-500 hover:text-red-700 font-bold transition cursor-pointer px-1">✕ Remove</button>
-                          </div>
-                        ) : (
-                          <div className="relative border border-dashed border-gray-300 rounded-lg p-6 bg-white hover:bg-gray-50 transition cursor-pointer flex flex-col items-center justify-center gap-1.5"
-                            onClick={() => {
-                              const inputEl = document.getElementById(`chapter-file-${idx}`);
-                              inputEl?.click();
-                            }}>
-                            <span className="text-2xl text-gray-300">📤</span>
-                            <span className="text-[11px] text-gray-500 font-bold">Click to choose a file or drag here</span>
-                            <span className="text-[9px] text-gray-400">PDF, Word, or Text up to 10MB</span>
-                            <input type="file" id={`chapter-file-${idx}`} accept=".pdf,.txt,.docx,.doc" className="hidden"
-                              onChange={e => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                const sizeStr = file.size > 1024 * 1024
-                                  ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
-                                  : `${Math.round(file.size / 1024)} KB`;
-                                const reader = new FileReader();
-                                reader.onloadend = async () => {
-                                  const base64 = (reader.result as string).split(',')[1];
-                                  try {
-                                    toast.loading(`Uploading ${file.name}...`, { id: `upload-chapter-${idx}` });
-                                    const res = await uploadAcademyFile({ data: { fileName: file.name, fileContentBase64: base64 } });
-                                    setChaptersList(prev => prev.map((item, i) => i === idx ? { ...item, fileName: file.name, fileSize: sizeStr, fileUrl: res.url } : item));
-                                    toast.success("File uploaded successfully!", { id: `upload-chapter-${idx}` });
-                                  } catch (err) {
-                                    toast.error("Failed to upload file", { id: `upload-chapter-${idx}` });
-                                  }
-                                };
-                                reader.readAsDataURL(file);
-                              }} />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Buttons row */}
-            <div className="flex gap-3 pt-2">
-              <button type="button" onClick={() => {
-                setChaptersList(prev => [...prev, { title: "", contentType: "paste", pastedText: "", fileName: "" }]);
-              }} className="flex-1 py-3 border border-dashed border-[#2D6A4F] text-[#2D6A4F] hover:bg-[#2D6A4F]/5 rounded-xl text-xs font-bold cursor-pointer transition flex items-center justify-center gap-2">
-                <span>+</span> Add Next Chapter (Chapter {chaptersList.length + 1})
-              </button>
+          {/* Content field */}
+          <div className="col-span-2 border-t border-gray-100 pt-4">
+            <label className={lbl}>Course Content (Markdown or Text)</label>
+            <textarea
+              rows={12}
+              className={`${inp} resize-none font-mono text-xs`}
+              value={content}
+              onChange={e => setContent(e.target.value)}
+              placeholder="Write, type, or paste your course content here directly in Markdown or plain text format..."
+            />
+            <div className="mt-2 flex justify-between items-center">
+              <span className="text-[10px] text-gray-400">Supports headings, lists, links, and bold text</span>
+              <label className="bg-gray-100 border border-gray-300 hover:bg-gray-200 text-gray-700 px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition flex items-center gap-1.5 shadow-xs shrink-0">
+                <span>📤 Append Resource/PDF Link</span>
+                <input type="file" accept=".pdf,.txt,.docx,.doc,image/*" className="hidden"
+                  onChange={async e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onloadend = async () => {
+                      const base64 = (reader.result as string).split(',')[1];
+                      try {
+                        toast.loading(`Uploading ${file.name}...`, { id: "content-upload" });
+                        const res = await uploadAcademyFile({ data: { fileName: file.name, fileContentBase64: base64 } });
+                        setContent(prev => prev + `\n\n[Download Resource: ${file.name}](${res.url})\n`);
+                        toast.success("Resource uploaded and appended!", { id: "content-upload" });
+                      } catch (err) {
+                        toast.error("Failed to upload resource", { id: "content-upload" });
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                  }} />
+              </label>
             </div>
           </div>
         </div>
@@ -1284,13 +1047,6 @@ function NewCourseForm({ onCreated, onCancel }: { onCreated: (c: Course) => void
           </button>
         </div>
       </div>
-
-      {importModalOpen && (
-        <SyllabusImportModal
-          onImport={handleBulkImport}
-          onClose={() => setImportModalOpen(false)}
-        />
-      )}
     </div>
   );
 }
@@ -1316,7 +1072,7 @@ export function AcademyBuilder() {
 
   // Stats
   const published = courses.filter(c => c.is_published).length;
-  const totalLessons = courses.reduce((a,c) => a + (c.lesson_count ?? 0), 0);
+  const totalDuration = courses.reduce((a,c) => a + (c.duration_minutes ?? 0), 0);
 
   return (
     <div className="flex flex-col h-full min-h-[600px] space-y-4">
@@ -1326,7 +1082,7 @@ export function AcademyBuilder() {
           { label: "Total Courses", val: courses.length },
           { label: "Published", val: published },
           { label: "Draft", val: courses.length - published },
-          { label: "Total Lessons", val: totalLessons },
+          { label: "Total Mins", val: totalDuration },
         ].map(s => (
           <div key={s.label} className="bg-white rounded-2xl border border-gray-150 px-5 py-4.5 shadow-xs">
             <p className="text-2xl font-bold text-[#2D6A4F]">{s.val}</p>
@@ -1375,7 +1131,7 @@ export function AcademyBuilder() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-800 truncate">{c.title}</p>
-                  <p className="text-[11px] text-gray-500 mt-1 font-semibold">{c.chapter_count} chapters · {c.lesson_count} lessons</p>
+                  <p className="text-[11px] text-gray-500 mt-1 font-semibold">{c.category} · {c.duration_minutes} mins</p>
                   <div className="flex items-center justify-between mt-2.5">
                     <span className={`inline-block text-[9px] font-bold px-2 py-0.5 rounded-full ${
                       c.is_published ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"

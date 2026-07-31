@@ -150,32 +150,57 @@ export function MarketsBuilder() {
     }
   };
 
+  const [syncingKamis, setSyncingKamis] = useState(false);
+
+  const handleKamisAutoSync = async () => {
+    setSyncingKamis(true);
+    try {
+      const { triggerAdminKamisSync } = await import("@/lib/api/admin.functions");
+      const res = await triggerAdminKamisSync();
+      toast.success(res.message || "KAMIS Market Price Index auto-synchronized!");
+      await loadData();
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || "Failed to sync KAMIS market prices");
+    } finally {
+      setSyncingKamis(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Upper header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 animate-fadeIn" style={{ fontFamily: "Playfair Display, serif" }}>
-            Wholesale Markets Manager
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold text-gray-900 animate-fadeIn" style={{ fontFamily: "Playfair Display, serif" }}>
+              Wholesale Markets Manager
+            </h2>
+            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2.5 py-1 rounded-full border border-emerald-300 flex items-center gap-1 shadow-xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              Automated KAMIS Feed Active
+            </span>
+          </div>
           <p className="text-xs text-gray-500 mt-1">
-            Publish, update, and audit real-time agricultural commodity prices. Direct sync to client portal.
+            Automated commodity price board synced via KAMIS live market benchmark engine. Manual editing disabled for price integrity.
           </p>
         </div>
         <div className="flex gap-2">
+          <button 
+            onClick={handleKamisAutoSync}
+            disabled={syncingKamis}
+            className="px-3.5 py-2 bg-[#2D6A4F] text-white hover:bg-[#224f3b] rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
+            title="Auto-fetch and update KAMIS market price benchmarks"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${syncingKamis ? "animate-spin" : ""}`} />
+            {syncingKamis ? "Syncing..." : "⚡ Trigger KAMIS Engine Sync"}
+          </button>
           <button 
             onClick={loadData}
             className="p-2 border border-gray-200 bg-white hover:bg-gray-50 rounded-lg text-gray-700 transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            Sync
-          </button>
-          <button
-            onClick={() => setShowAddCommodity(true)}
-            className="bg-[#2D6A4F] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-[#224f3b] transition flex items-center gap-1.5 cursor-pointer shadow-md"
-          >
-            <Plus className="h-4 w-4" />
-            Add Commodity
+            Refresh
           </button>
         </div>
       </div>
@@ -237,16 +262,6 @@ export function MarketsBuilder() {
                             <span className="text-[8px] text-gray-400 block font-mono">Latest ({comm.entries[0].region})</span>
                           </div>
                         )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteCommodity(comm.id, comm.name);
-                          }}
-                          className="p-1 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded transition cursor-pointer"
-                          title="Delete commodity"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
                         <ChevronRight className={`h-4 w-4 text-gray-300 ${isSelected ? "text-[#2D6A4F] translate-x-0.5" : ""} transition-transform`} />
                       </div>
                     </div>
@@ -264,16 +279,12 @@ export function MarketsBuilder() {
               {/* Header */}
               <div className="px-5 py-4 bg-gray-50/70 border-b border-gray-100 flex items-center justify-between">
                 <div>
-                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-[#2D6A4F]">Active Price Board</span>
+                  <span className="text-[9px] font-extrabold uppercase tracking-wider text-[#2D6A4F]">KAMIS Live Regional Board</span>
                   <h3 className="text-sm font-bold text-gray-900 mt-0.5">{selectedCommodity.name} ({selectedCommodity.unit})</h3>
                 </div>
-                <button
-                  onClick={() => setShowAddPrice(true)}
-                  className="bg-[#2D6A4F]/10 hover:bg-[#2D6A4F]/20 text-[#2D6A4F] px-3 py-1.5 rounded-lg text-[10px] font-bold transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add Regional Price
-                </button>
+                <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full border border-emerald-200">
+                  ⚡ Auto-Managed
+                </span>
               </div>
 
               {/* Table of prices */}
@@ -282,36 +293,27 @@ export function MarketsBuilder() {
                   <thead>
                     <tr className="bg-gray-50/40 border-b border-gray-100 text-[10px] uppercase font-bold text-gray-400">
                       <th className="py-2.5 px-5">Region</th>
-                      <th className="py-2.5 px-5">Source</th>
+                      <th className="py-2.5 px-5">Feed Source</th>
                       <th className="py-2.5 px-5 text-right">Price</th>
-                      <th className="py-2.5 px-5">Recorded At</th>
-                      <th className="py-2.5 px-5 text-right">Actions</th>
+                      <th className="py-2.5 px-5 text-right">Recorded At</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50 text-gray-600 font-medium">
                     {selectedCommodity.entries && selectedCommodity.entries.length > 0 ? (
                       selectedCommodity.entries.map((entry: any) => (
                         <tr key={entry.id} className="hover:bg-gray-50/50">
-                          <td className="py-3 px-5 text-gray-900 flex items-center gap-1.5">
-                            <MapPin className="h-3.5 w-3.5 text-[#2D6A4F]/70" />
+                          <td className="py-3 px-5 text-gray-900 flex items-center gap-1.5 font-bold">
+                            <MapPin className="h-3.5 w-3.5 text-[#2D6A4F]" />
                             {entry.region}
                           </td>
                           <td className="py-3 px-5 text-gray-500 text-[11px]">
-                            {entry.source || "Unknown Source"}
+                            {entry.source || "KAMIS Automated Engine"}
                           </td>
-                          <td className="py-3 px-5 text-right font-mono font-bold text-[#2D6A4F]">
+                          <td className="py-3 px-5 text-right font-mono font-black text-[#2D6A4F]">
                             KES {entry.price.toLocaleString()}
                           </td>
-                          <td className="py-3 px-5 text-gray-400 text-[10px]">
-                            {new Date(entry.recorded_at).toLocaleDateString()}
-                          </td>
-                          <td className="py-3 px-5 text-right">
-                            <button
-                              onClick={() => handleDeletePrice(entry.id)}
-                              className="text-red-500 hover:text-red-700 hover:underline text-[10px] font-bold cursor-pointer"
-                            >
-                              Remove
-                            </button>
+                          <td className="py-3 px-5 text-right text-gray-400 text-[10px]">
+                            {new Date(entry.recorded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({new Date(entry.recorded_at).toLocaleDateString()})
                           </td>
                         </tr>
                       ))

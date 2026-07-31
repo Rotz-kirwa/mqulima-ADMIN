@@ -3,7 +3,7 @@ import {
   Search, Users, ChevronLeft, ChevronRight, Phone, Mail,
   Copy, Download,
   Edit2, X, ExternalLink, Eye, ArrowUpDown, RefreshCw,
-  FileSpreadsheet, Lock
+  FileSpreadsheet, Lock, Trash2
 } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -47,20 +47,104 @@ const FARMING_TYPES = [
 export function CustomerManager({ adminUser }: CustomerManagerProps) {
   const isWritable = ["super_admin", "admin"].includes(adminUser.role);
 
+  // Helper to read initial filter values from URL or sessionStorage
+  const getInitialValue = (key: string, defaultVal: string) => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const urlVal = params.get(key);
+      if (urlVal !== null) return urlVal;
+      const stored = sessionStorage.getItem(`mq_cm_${key}`);
+      if (stored !== null) return stored;
+    }
+    return defaultVal;
+  };
+
   // Table state
   const [customers, setCustomers] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
+  const [page, setPageState] = useState<number>(() => {
+    const val = getInitialValue("page", "1");
+    return parseInt(val, 10) || 1;
+  });
   const [limit] = useState(10);
-  const [search, setSearch] = useState("");
-  const [county, setCounty] = useState("All");
-  const [farmingType, setFarmingType] = useState("All");
-  const [status, setStatus] = useState("All");
-  const [role, setRole] = useState("All");
+  const [search, setSearchState] = useState(() => getInitialValue("search", ""));
+  const [county, setCountyState] = useState(() => getInitialValue("county", "All"));
+  const [farmingType, setFarmingTypeState] = useState(() => getInitialValue("farmingType", "All"));
+  const [status, setStatusState] = useState(() => getInitialValue("status", "All"));
+  const [role, setRoleState] = useState(() => getInitialValue("role", "All"));
   const [sortBy, setSortBy] = useState("created_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // Setters that persist to sessionStorage and update URL query params
+  const setPage = (val: number | ((prev: number) => number)) => {
+    setPageState(prev => {
+      const next = typeof val === "function" ? val(prev) : val;
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("mq_cm_page", String(next));
+        const url = new URL(window.location.href);
+        url.searchParams.set("page", String(next));
+        window.history.replaceState({}, "", url.toString());
+      }
+      return next;
+    });
+  };
+
+  const setSearch = (val: string) => {
+    setSearchState(val);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("mq_cm_search", val);
+      const url = new URL(window.location.href);
+      if (val) url.searchParams.set("search", val);
+      else url.searchParams.delete("search");
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
+
+  const setCounty = (val: string) => {
+    setCountyState(val);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("mq_cm_county", val);
+      const url = new URL(window.location.href);
+      if (val !== "All") url.searchParams.set("county", val);
+      else url.searchParams.delete("county");
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
+
+  const setFarmingType = (val: string) => {
+    setFarmingTypeState(val);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("mq_cm_farmingType", val);
+      const url = new URL(window.location.href);
+      if (val !== "All") url.searchParams.set("farmingType", val);
+      else url.searchParams.delete("farmingType");
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
+
+  const setStatus = (val: string) => {
+    setStatusState(val);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("mq_cm_status", val);
+      const url = new URL(window.location.href);
+      if (val !== "All") url.searchParams.set("status", val);
+      else url.searchParams.delete("status");
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
+
+  const setRole = (val: string) => {
+    setRoleState(val);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("mq_cm_role", val);
+      const url = new URL(window.location.href);
+      if (val !== "All") url.searchParams.set("role", val);
+      else url.searchParams.delete("role");
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
 
   // Detail Drawer state
   const [activeCustomerId, setActiveCustomerId] = useState<string | null>(null);
@@ -383,6 +467,24 @@ export function CustomerManager({ adminUser }: CustomerManagerProps) {
     drawField("Completed Deliveries:", `${stats.completedOrders} Orders`);
     drawField("Active/Pending Orders:", `${stats.currentOrders} Orders`);
     drawField("Total Value Spent:", `KES ${stats.totalSpent.toLocaleString()}`);
+
+    // Section: Forum & Social Activities
+    const comm = profileData.communityActivities || {};
+    y += 4;
+    doc.setTextColor(11, 106, 71);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("3. Forum & Social Media Activities", 15, y);
+    y += 3;
+    doc.line(15, y, 195, y);
+    y += 8;
+
+    doc.setTextColor(30, 27, 24);
+    drawField("Followers Count:", `${comm.followersCount || 0} Followers`);
+    drawField("Following Count:", `${comm.followingCount || 0} Farmers`);
+    drawField("Forum Posts Published:", `${comm.postsCount || 0} Posts`);
+    drawField("Comments Contributed:", `${comm.commentsCount || 0} Comments`);
+    drawField("Direct Messages Sent:", `${comm.dmsSentCount || 0} DMs`);
 
     // Add page if details overflow
     if (y > 220) {
@@ -735,12 +837,22 @@ export function CustomerManager({ adminUser }: CustomerManagerProps) {
                             disabled={!isWritable}
                             className={`p-1 rounded cursor-pointer ${
                               isWritable 
-                                ? (c.status === "suspended" ? "hover:bg-gray-100 text-emerald-600" : "hover:bg-gray-100 text-red-500")
+                                ? (c.status === "suspended" ? "hover:bg-gray-100 text-emerald-600" : "hover:bg-gray-100 text-amber-500")
                                 : "text-gray-300 cursor-not-allowed"
                             }`}
                             title={isWritable ? (c.status === "suspended" ? "Reactivate Account" : "Suspend Account") : "Requires Admin privileges"}
                           >
                             <Lock className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(c.id)}
+                            disabled={!isWritable}
+                            className={`p-1 rounded cursor-pointer ${
+                              isWritable ? "hover:bg-red-50 text-red-500 hover:text-red-700" : "text-gray-300 cursor-not-allowed"
+                            }`}
+                            title={isWritable ? "Delete customer account" : "Requires Admin privileges"}
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
                       </td>
@@ -918,6 +1030,55 @@ export function CustomerManager({ adminUser }: CustomerManagerProps) {
                       <h4 className="text-xs font-extrabold uppercase tracking-wider text-[#2D6A4F]">Nature of Farming Focus</h4>
                       <div className="bg-[#FCFBF4] rounded-xl border border-gray-200 p-4 text-xs font-semibold text-gray-800">
                         {details.customer.nature_of_agriculture || "No farming profile details specified."}
+                      </div>
+                    </div>
+
+                    {/* Section: Forum & Social Media Activities */}
+                    <div className="space-y-3">
+                      <h4 className="text-xs font-extrabold uppercase tracking-wider text-[#2D6A4F] flex items-center justify-between">
+                        <span>Forum & Community Activities</span>
+                        <span className="text-[10px] text-gray-400 font-normal">Social Network Details</span>
+                      </h4>
+                      
+                      <div className="bg-[#FCFBF4] rounded-xl border border-gray-200 p-4 space-y-3">
+                        <div className="grid grid-cols-4 gap-2 text-center border-b border-gray-200/80 pb-3">
+                          <div className="bg-white p-2 rounded-lg border border-gray-100">
+                            <span className="text-[9px] font-bold uppercase text-gray-400 block">Followers</span>
+                            <span className="text-sm font-black text-emerald-800">{details.communityActivities?.followersCount || 0}</span>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-gray-100">
+                            <span className="text-[9px] font-bold uppercase text-gray-400 block">Following</span>
+                            <span className="text-sm font-black text-gray-800">{details.communityActivities?.followingCount || 0}</span>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-gray-100">
+                            <span className="text-[9px] font-bold uppercase text-gray-400 block">Posts</span>
+                            <span className="text-sm font-black text-[#2D6A4F]">{details.communityActivities?.postsCount || 0}</span>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-gray-100">
+                            <span className="text-[9px] font-bold uppercase text-gray-400 block">Comments</span>
+                            <span className="text-sm font-black text-blue-800">{details.communityActivities?.commentsCount || 0}</span>
+                          </div>
+                        </div>
+
+                        {/* Recent Published Posts */}
+                        {details.communityActivities?.recentPosts && details.communityActivities.recentPosts.length > 0 ? (
+                          <div className="space-y-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 block">Recent Forum Posts</span>
+                            {details.communityActivities.recentPosts.slice(0, 3).map((post: any) => (
+                              <div key={post.id} className="bg-white border border-gray-200/80 rounded-lg p-2.5 text-xs flex justify-between items-center">
+                                <div className="min-w-0 flex-1 pr-2">
+                                  <span className="font-semibold text-gray-900 block truncate">{post.title}</span>
+                                  <span className="text-[10px] text-gray-400 font-mono block">{post.date} • {post.likes} Likes • {post.comments} Comments</span>
+                                </div>
+                                <span className="text-[9px] font-black uppercase bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
+                                  {post.type}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400 italic block">No community forum posts published yet.</span>
+                        )}
                       </div>
                     </div>
 
