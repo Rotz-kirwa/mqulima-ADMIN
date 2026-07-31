@@ -1589,6 +1589,11 @@ export const getAdminCustomerDetails = createServerFn({ method: "GET" })
         p.county_region,
         p.delivery_address,
         p.nature_of_agriculture,
+        p.bio,
+        p.website,
+        p.cover_image,
+        p.farming_activities,
+        p.farming_photos,
         p.role,
         p.status,
         p.avatar_url,
@@ -1777,6 +1782,8 @@ export const updateAdminCustomerDetails = createServerFn({ method: "POST" })
     countyRegion: z.string().min(1),
     deliveryAddress: z.string().min(1),
     natureOfAgriculture: z.string().min(1),
+    bio: z.string().optional(),
+    website: z.string().optional(),
     status: z.enum(["active", "suspended", "pending"]),
   }))
   .handler(async ({ data }) => {
@@ -1802,6 +1809,8 @@ export const updateAdminCustomerDetails = createServerFn({ method: "POST" })
           county_region = ${data.countyRegion},
           delivery_address = ${data.deliveryAddress},
           nature_of_agriculture = ${data.natureOfAgriculture},
+          bio = ${data.bio || null},
+          website = ${data.website || null},
           status = ${data.status},
           updated_at = NOW()
         WHERE id = ${data.customerId}

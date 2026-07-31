@@ -162,6 +162,8 @@ export function CustomerManager({ adminUser }: CustomerManagerProps) {
     countyRegion: "Nairobi",
     deliveryAddress: "",
     natureOfAgriculture: "Crop Farming (Horticulture)",
+    bio: "",
+    website: "",
     status: "active" as "active" | "suspended" | "pending"
   });
   const [savingEdit, setSavingEdit] = useState(false);
@@ -303,6 +305,8 @@ export function CustomerManager({ adminUser }: CustomerManagerProps) {
       countyRegion: customer.county_region || "Nairobi",
       deliveryAddress: customer.delivery_address || "",
       natureOfAgriculture: customer.nature_of_agriculture || "Crop Farming (Horticulture)",
+      bio: customer.bio || "",
+      website: customer.website || "",
       status: customer.status || "active"
     });
   };
@@ -1032,6 +1036,29 @@ export function CustomerManager({ adminUser }: CustomerManagerProps) {
                         {details.customer.nature_of_agriculture || "No farming profile details specified."}
                       </div>
                     </div>
+
+                    {/* Section: Bio & Website */}
+                    {(details.customer.bio || details.customer.website) && (
+                      <div className="space-y-3">
+                        <h4 className="text-xs font-extrabold uppercase tracking-wider text-[#2D6A4F]">Farmer Biography & Website</h4>
+                        <div className="bg-[#FCFBF4] rounded-xl border border-gray-200 p-4 space-y-2 text-xs">
+                          {details.customer.bio && (
+                            <div>
+                              <span className="text-[10px] font-bold text-gray-400 block uppercase">Bio</span>
+                              <p className="text-gray-700 font-medium leading-relaxed">{details.customer.bio}</p>
+                            </div>
+                          )}
+                          {details.customer.website && (
+                            <div>
+                              <span className="text-[10px] font-bold text-gray-400 block uppercase">Website / Link</span>
+                              <a href={details.customer.website} target="_blank" rel="noreferrer" className="text-[#2D6A4F] font-bold hover:underline">
+                                {details.customer.website}
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Section: Forum & Social Media Activities */}
                     <div className="space-y-3">
